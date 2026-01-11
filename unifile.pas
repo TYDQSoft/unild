@@ -510,25 +510,25 @@ begin
        SetLength(Result.SymbolTable.SymbolVisibility,SymbolCount);
        for j:=1 to SymbolCount-1 do
         begin
-         Result.SymbolTable.SymbolName[j-1]:=
+         Result.SymbolTable.SymbolName[j]:=
          StrTabPointer+
          Pelf32_symbol_table_entry(SectionDataPointer+j*sizeof(elf32_symbol_table_entry))^.symbol_name;
-         Result.SymbolTable.SymbolSectionIndex[j-1]:=
+         Result.SymbolTable.SymbolSectionIndex[j]:=
          Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_section_index;
-         Result.SymbolTable.SymbolValue[j-1]:=
+         Result.SymbolTable.SymbolValue[j]:=
          Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_value;
-         Result.SymbolTable.SymbolSize[j-1]:=
+         Result.SymbolTable.SymbolSize[j]:=
          Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_size;
-         Result.SymbolTable.SymbolType[j-1]:=
+         Result.SymbolTable.SymbolType[j]:=
          elf_symbol_type_type(Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_info);
-         Result.SymbolTable.SymbolBinding[j-1]:=
+         Result.SymbolTable.SymbolBinding[j]:=
          elf_symbol_type_bind(Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_info);
-         Result.SymbolTable.SymbolVisibility[j-1]:=
+         Result.SymbolTable.SymbolVisibility[j]:=
          Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_other;
         end;
@@ -588,25 +588,25 @@ begin
        SetLength(Result.SymbolTable.SymbolVisibility,SymbolCount);
        for j:=1 to SymbolCount-1 do
         begin
-         Result.SymbolTable.SymbolName[j-1]:=
+         Result.SymbolTable.SymbolName[j]:=
          StrTabPointer+
          Pelf64_symbol_table_entry(SectionDataPointer+j*sizeof(elf64_symbol_table_entry))^.symbol_name;
-         Result.SymbolTable.SymbolSectionIndex[j-1]:=
+         Result.SymbolTable.SymbolSectionIndex[j]:=
          Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_section_index;
-         Result.SymbolTable.SymbolValue[j-1]:=
+         Result.SymbolTable.SymbolValue[j]:=
          Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_value;
-         Result.SymbolTable.SymbolSize[j-1]:=
+         Result.SymbolTable.SymbolSize[j]:=
          Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_size;
-         Result.SymbolTable.SymbolType[j-1]:=
+         Result.SymbolTable.SymbolType[j]:=
          elf_symbol_type_type(Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_info);
-         Result.SymbolTable.SymbolBinding[j-1]:=
+         Result.SymbolTable.SymbolBinding[j]:=
          elf_symbol_type_bind(Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_info);
-         Result.SymbolTable.SymbolVisibility[j-1]:=
+         Result.SymbolTable.SymbolVisibility[j]:=
          Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_other;
         end;
@@ -1075,16 +1075,22 @@ begin
            Pelf32_rela(ContentPointer+(k-1)*12)^.Offset;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationAddend[k-1]:=
            Pelf32_rela(ContentPointer+(k-1)*12)^.Addend;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
-           totalfile.Objects[i-1].SymbolTable.SymbolName[
-           elf32_reloc_symbol(Pelf32_rela(ContentPointer+(k-1)*12)^.Info)];
-           if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
-           and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
-           then
-            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
-            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]
-            +unifile_generate_index(i)
-            +unifile_generate_index(elf32_reloc_symbol(Pelf32_rela(ContentPointer+(k-1)*12)^.Info));
+           if(elf32_reloc_symbol(Pelf32_rela(ContentPointer+(k-1)*12)^.Info)<>0) then
+            begin
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+             totalfile.Objects[i-1].SymbolTable.SymbolName[
+             elf32_reloc_symbol(Pelf32_rela(ContentPointer+(k-1)*12)^.Info)];
+             if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
+             and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
+             then
+              begin
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]
+               +unifile_generate_index(i)
+               +unifile_generate_index(elf32_reloc_symbol(Pelf32_rela(ContentPointer+(k-1)*12)^.Info));
+              end;
+            end
+           else Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:='';
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
            unihash_generate_value(
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1],false);
@@ -1121,9 +1127,22 @@ begin
            Pelf64_rela(ContentPointer+(k-1)*24)^.Offset;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationAddend[k-1]:=
            Pelf64_rela(ContentPointer+(k-1)*24)^.Addend;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
-           totalfile.Objects[i-1].SymbolTable.SymbolName[
-           elf64_reloc_symbol(Pelf64_rela(ContentPointer+(k-1)*24)^.Info)];
+           if(elf64_reloc_symbol(Pelf64_rela(ContentPointer+(k-1)*24)^.Info)<>0) then
+            begin
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+             totalfile.Objects[i-1].SymbolTable.SymbolName[
+             elf64_reloc_symbol(Pelf64_rela(ContentPointer+(k-1)*24)^.Info)];
+             if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
+             and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
+             then
+              begin
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]
+               +unifile_generate_index(i)
+               +unifile_generate_index(elf64_reloc_symbol(Pelf64_rela(ContentPointer+(k-1)*24)^.Info));
+              end;
+            end
+           else Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:='';
            if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
            and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
            then
@@ -1170,9 +1189,22 @@ begin
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset[k-1]:=
            Pelf32_rel(ContentPointer+(k-1)*8)^.Offset;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationAddend[k-1]:=0;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
-           totalfile.Objects[i-1].SymbolTable.SymbolName[
-           elf32_reloc_symbol(Pelf32_rel(ContentPointer+(k-1)*8)^.Info)];
+           if(elf32_reloc_symbol(Pelf32_rel(ContentPointer+(k-1)*8)^.Info)<>0) then
+            begin
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+             totalfile.Objects[i-1].SymbolTable.SymbolName[
+             elf32_reloc_symbol(Pelf32_rel(ContentPointer+(k-1)*8)^.Info)];
+             if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
+             and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
+             then
+              begin
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]
+               +unifile_generate_index(i)
+               +unifile_generate_index(elf32_reloc_symbol(Pelf32_rel(ContentPointer+(k-1)*8)^.Info));
+              end;
+            end
+           else Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:='';
            if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
            and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
            then
@@ -1214,9 +1246,22 @@ begin
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset[k-1]:=
            Pelf64_rel(ContentPointer+(k-1)*8)^.Offset;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationAddend[k-1]:=0;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
-           totalfile.Objects[i-1].SymbolTable.SymbolName[
-           elf64_reloc_symbol(Pelf64_rel(ContentPointer+(k-1)*16)^.Info)];
+           if(elf64_reloc_symbol(Pelf64_rel(ContentPointer+(k-1)*16)^.Info)<>0) then
+            begin
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+             totalfile.Objects[i-1].SymbolTable.SymbolName[
+             elf64_reloc_symbol(Pelf64_rel(ContentPointer+(k-1)*16)^.Info)];
+             if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
+             and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
+             then
+              begin
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=
+               Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]
+               +unifile_generate_index(i)
+               +unifile_generate_index(elf64_reloc_symbol(Pelf64_rel(ContentPointer+(k-1)*16)^.Info));
+              end;
+            end
+           else Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:='';
            if(length(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1])>0)
            and(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1][1]='.')
            then
@@ -1318,18 +1363,20 @@ begin
  if(SectionVaild.Enable[Index3-1]) then exit(0);
  SectionVaild.Enable[Index3-1]:=true;
  Index2:=unifile_search_for_hash_table(RelocationHash,SymbolList.SymbolSectionNameHash[Index1-1]);
- if(Index2=0) then exit(0);
- i:=1;
- while(i<=RelocationList.Relocation[Index2-1].RelocationCount)do
+ if(Index2<>0) then
   begin
-   if(RelocationList.Relocation[Index2-1].RelocationSymbolHash[i-1]=0) then
+   i:=1;
+   while(i<=RelocationList.Relocation[Index2-1].RelocationCount)do
     begin
-     inc(i); continue;
+     if(RelocationList.Relocation[Index2-1].RelocationSymbolHash[i-1]=0) then
+      begin
+       inc(i); continue;
+      end;
+     unifile_get_smartlinking(SectionHash,SymbolHash,RelocationHash,
+     SymbolList,RelocationList,SectionVaild,
+     RelocationList.Relocation[Index2-1].RelocationSymbolHash[i-1]);
+     inc(i);
     end;
-   unifile_get_smartlinking(SectionHash,SymbolHash,RelocationHash,
-   SymbolList,RelocationList,SectionVaild,
-   RelocationList.Relocation[Index2-1].RelocationSymbolHash[i-1]);
-   inc(i);
   end;
  Result:=Index1;
 end;
@@ -5206,7 +5253,8 @@ begin
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-           basefile.AdjustTable.AdjustAddend[i-1];
+           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_i386_relative);
@@ -5360,7 +5408,8 @@ begin
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-           basefile.AdjustTable.AdjustAddend[i-1];
+           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_i386_relative);
@@ -5691,7 +5740,8 @@ begin
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-           basefile.AdjustTable.AdjustAddend[i-1];
+           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_x86_64_relative);
@@ -5847,7 +5897,8 @@ begin
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-           basefile.AdjustTable.AdjustAddend[i-1];
+           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_aarch64_relative);
@@ -6263,7 +6314,8 @@ begin
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-             basefile.AdjustTable.AdjustAddend[i-1];
+             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_riscv_relative);
@@ -6277,7 +6329,8 @@ begin
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-             basefile.AdjustTable.AdjustAddend[i-1];
+             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_riscv_relative);
@@ -6576,7 +6629,8 @@ begin
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-             basefile.AdjustTable.AdjustAddend[i-1];
+             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_loongarch_relative);
@@ -6590,7 +6644,8 @@ begin
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-             basefile.AdjustTable.AdjustAddend[i-1];
+             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
+             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_loongarch_relative);

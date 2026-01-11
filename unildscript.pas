@@ -103,7 +103,7 @@ begin
  Script.EntryName:=''; Script.FileAlign:=0; Script.NoDefaultLibrary:=false;
  Script.NoExternalLibrary:=false; Script.NoSymbol:=false; Script.NoFixedAddress:=true;
  Script.SectionCount:=0; Script.SystemIndex:=0; Script.SmartLinking:=false; Script.LinkAll:=true;
- Script.NoExecutableStack:=false; Script.NoGotWritable:=false;
+ Script.NoExecutableStack:=false; Script.NoGotWritable:=false; Script.UntypedBinaryAlign:=0;
  Script.InputFormat:=''; Script.OutputFormat:=''; Script.IsUntypedBinary:=false;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
