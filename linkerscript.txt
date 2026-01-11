@@ -1,0 +1,19 @@
+Entry(_start)
+FileAlign($1000)
+Section(.text,align=$1000,read,execute)
+begin
+ *(.text*)
+end;
+Section(.vectab,align=$800,read,execute)
+begin
+ *(.vectab*)
+end;
+Section(.rodata,align=$1000,read)
+begin
+ *(.rodata*)
+end;
+Section(.data,align=$800,read,write)
+begin
+ *(.data*)
+ *(.bss*)
+end;
