@@ -1512,6 +1512,12 @@ begin
  RelocationList.Relocation:=basefile.SectionRelocation;
  c:=unifile_get_smartlinking(SectionHash,SymbolHash,RelocationHash,basefile.SectionSymbolTable,
  RelocationList,SectionVaild,EntryHash);
+ if(c=0) then
+  begin
+   writeln('ERROR:Entry '+basescript.EntryName+' not found.');
+   readln;
+   halt;
+  end;
  Result.EntryName:=basescript.EntryName; Result.EntryHash:=EntryHash;
  Result.EntrySection:=basefile.SectionSymbolTable.SymbolSectionName[c-1];
  Result.EntrySectionHash:=basefile.SectionSymbolTable.SymbolSectionNameHash[c-1];
