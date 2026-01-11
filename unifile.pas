@@ -122,6 +122,7 @@ type unifile_elf_object_file_symbol_table=packed record
                                  Content:array of Pointer;
                                  ContentSize:array of SizeUint;
                                  ContentOffset:array of SizeInt;
+                                 ContentSizeGot:array of boolean;
                                  Count:SizeUInt;
                                  end;
      unifile_linked_file_symbol_table=packed record
@@ -1671,6 +1672,7 @@ begin
       end;
      inc(k);
     end;
+   SetLength(Result.SectionContent[i-1].ContentSizeGot,Result.SectionContent[i-1].count);
    Result.SectionAttribute[i-1]:=AttributeData;
    Result.SectionSize[i-1]:=InternalOffset;
    if(InternalOffset=0) then Result.SectionVaild[i-1]:=false;
@@ -2982,19 +2984,31 @@ var i,j,x,y:SizeUint;
 begin
  i:=left; j:=right; x:=(left+right) div 2;
  repeat
-  while(SymbolTable.SymbolBinding[SymbolIndex[i-1]-1]<SymbolTable.SymbolBinding[SymbolIndex[x-1]-1])
-  or((SymbolTable.SymbolBinding[SymbolIndex[i-1]-1]=SymbolTable.SymbolBinding[SymbolIndex[x-1]-1])
-  and(SymbolTable.SymbolType[SymbolIndex[i-1]-1]<SymbolTable.SymbolType[SymbolIndex[x-1]-1])) do
-  inc(i);
-  while(SymbolTable.SymbolBinding[SymbolIndex[j-1]-1]>SymbolTable.SymbolBinding[SymbolIndex[x-1]-1])
-  or((SymbolTable.SymbolBinding[SymbolIndex[j-1]-1]=SymbolTable.SymbolBinding[SymbolIndex[x-1]-1])
-  and(SymbolTable.SymbolType[SymbolIndex[j-1]-1]>SymbolTable.SymbolType[SymbolIndex[x-1]-1])) do
-  dec(j);
+  while(SymbolTable.SymbolSectionIndex[SymbolIndex[i-1]-1]<
+  SymbolTable.SymbolSectionIndex[SymbolIndex[x-1]-1])
+  or((SymbolTable.SymbolSectionIndex[SymbolIndex[i-1]-1]=
+  SymbolTable.SymbolSectionIndex[SymbolIndex[x-1]-1])
+  and(SymbolTable.SymbolType[SymbolIndex[i-1]-1]<
+  SymbolTable.SymbolType[SymbolIndex[x-1]-1])) do inc(i);
+  while(SymbolTable.SymbolSectionIndex[SymbolIndex[j-1]-1]>
+  SymbolTable.SymbolSectionIndex[SymbolIndex[x-1]-1])
+  or((SymbolTable.SymbolSectionIndex[SymbolIndex[j-1]-1]=
+  SymbolTable.SymbolSectionIndex[SymbolIndex[x-1]-1])
+  and(SymbolTable.SymbolType[SymbolIndex[j-1]-1]>
+  SymbolTable.SymbolType[SymbolIndex[x-1]-1])) do dec(j);
   if(i<=j) then
    begin
-    y:=SymbolIndex[i-1];
-    SymbolIndex[i-1]:=SymbolIndex[j-1];
-    SymbolIndex[j-1]:=y;
+    if(SymbolTable.SymbolSectionIndex[SymbolIndex[i-1]-1]<>
+    SymbolTable.SymbolSectionIndex[SymbolIndex[j-1]-1])
+    or((SymbolTable.SymbolSectionIndex[SymbolIndex[i-1]-1]=
+    SymbolTable.SymbolSectionIndex[SymbolIndex[j-1]-1])
+    and(SymbolTable.SymbolType[SymbolIndex[i-1]-1]<>
+    SymbolTable.SymbolType[SymbolIndex[j-1]-1])) then
+     begin
+      y:=SymbolIndex[i-1];
+      SymbolIndex[i-1]:=SymbolIndex[j-1];
+      SymbolIndex[j-1]:=y;
+     end;
     inc(i); dec(j);
    end;
  until (i>j);
@@ -4487,6 +4501,13 @@ begin
        finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
        finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
        finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
+       if(basefile.SymbolTable.SymbolSize[i-1]=0) and
+       (basefile.SectionContent[m-1].ContentSizeGot[n-1]=false) then
+        begin
+         finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SectionContent[m-1].ContentSize[n-1];
+         basefile.SectionContent[m-1].ContentSizeGot[n-1]:=true;
+        end
+       else
        finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
        finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
        finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[m-1].ContentOffset[n-1];
@@ -4525,6 +4546,14 @@ begin
        finalfile.DynamicSymbolTable.SymbolName[k-1]:=basefile.SymbolTable.SymbolName[i-1];
        finalfile.DynamicSymbolTable.SymbolNameHash[k-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
        finalfile.DynamicSymbolTable.SymbolBinding[k-1]:=basefile.SymbolTable.SymbolBinding[i-1];
+       if(basefile.SymbolTable.SymbolSize[i-1]=0) and
+       (basefile.SectionContent[m-1].ContentSizeGot[n-1]=false) then
+        begin
+         finalfile.DynamicSymbolTable.SymbolSize[j-1]:=basefile.SectionContent[m-1].ContentSize[n-1];
+         basefile.SectionContent[m-1].ContentSizeGot[n-1]:=true;
+        end
+       else
+       finalfile.DynamicSymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
        finalfile.DynamicSymbolTable.SymbolSize[k-1]:=basefile.SymbolTable.SymbolSize[i-1];
        finalfile.DynamicSymbolTable.SymbolType[k-1]:=basefile.SymbolTable.SymbolType[i-1];
        finalfile.DynamicSymbolTable.SymbolValue[k-1]:=basefile.SectionContent[m-1].ContentOffset[n-1];
@@ -4582,6 +4611,13 @@ begin
      finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
      finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
      finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
+     if(basefile.SymbolTable.SymbolSize[i-1]=0) and
+     (basefile.SectionContent[m-1].ContentSizeGot[n-1]=false) then
+      begin
+       finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SectionContent[m-1].ContentSize[n-1];
+       basefile.SectionContent[m-1].ContentSizeGot[n-1]:=true;
+      end
+     else
      finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
      finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
      finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[m-1].ContentOffset[n-1];
@@ -7464,7 +7500,7 @@ begin
          Pelf32_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf32_symbol_table_entry))^.symbol_other:=
          finalfile.SymbolTable.SymbolVisibility[finalfile.SymbolTableNewIndex[i-1]-1];
-         if(basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file) then
+         if(basescript.elfclass<>unild_class_relocatable) then
          Pelf32_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf32_symbol_table_entry))^.symbol_value:=
          finalfile.SectionAddress[finalfile.SymbolTable.SymbolSectionIndex[finalfile.SymbolTableNewIndex[i-1]-1]-1]+
@@ -7491,7 +7527,7 @@ begin
          Pelf64_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf64_symbol_table_entry))^.symbol_other:=
          finalfile.SymbolTable.SymbolVisibility[finalfile.SymbolTableNewIndex[i-1]-1];
-         if(basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file) then
+         if(basescript.elfclass<>unild_class_relocatable) then
          Pelf64_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf64_symbol_table_entry))^.symbol_value:=
          finalfile.SectionAddress[finalfile.SymbolTable.SymbolSectionIndex[finalfile.SymbolTableNewIndex[i-1]-1]-1]+
@@ -7507,6 +7543,7 @@ begin
          finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1][j];
          inc(j); inc(WritePointer2);
         end;
+       inc(WritePointer2);
        inc(WritePointer1);
        inc(i);
       end;

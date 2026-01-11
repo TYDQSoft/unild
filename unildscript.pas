@@ -58,6 +58,9 @@ type unild_item=packed record
                   Section:array of unild_section;
                   SectionCount:Word;
                   OutputFormat:string;
+                  {Temporary Variables}
+                  DynamicPathWithSubDirectoryList:array of string;
+                  DynamicPathWithSubDirectoryCount:SizeUint;
                   end;
      unild_line_item=packed record
                      Item:array of string;
@@ -105,6 +108,7 @@ begin
  Script.SectionCount:=0; Script.SystemIndex:=0; Script.SmartLinking:=false; Script.LinkAll:=true;
  Script.NoExecutableStack:=false; Script.NoGotWritable:=false; Script.UntypedBinaryAlign:=0;
  Script.InputFormat:=''; Script.OutputFormat:=''; Script.IsUntypedBinary:=false;
+ Script.DynamicPathWithSubDirectoryCount:=0;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -888,8 +892,72 @@ begin
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Dynamic Library Path must be dynamiclibrarypath/dynamic_library_path'
-         +'/sharedlibrarypath/shared_library_path(LibrarySearchPath)');
+         writeln('ERROR:Dynamic Library Path must be '+
+         'dynamiclibrarysearchpath/dynamic_library_search_path'+
+         '/sharedlibrarysearchpath/shared_library_search_path(LibrarySearchPath)');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='dynamiclibrary_search_withsubdir') or
+     (LowerCase(LineList.Line[i-1].Item[0])='dynamiclibrarysearch_withsubdir') or
+     (LowerCase(LineList.Line[i-1].Item[0])='dynamiclibrarysearchwithsubdir') or
+     (LowerCase(LineList.Line[i-1].Item[0])='sharedlibrary_search_withsubdir') or
+     (LowerCase(LineList.Line[i-1].Item[0])='sharedlibrarysearch_withsubdir') or
+     (LowerCase(LineList.Line[i-1].Item[0])='sharedlibrarysearchwithsubdir') then
+      begin
+       if(LineList.Line[i-1].Count>=4) then
+        begin
+         j:=3; k:=4;
+         while(j<=LineList.Line[i-1].Count)do
+          begin
+           k:=j+1; tempstr2:=LineList.Line[i-1].Item[j-1];
+           while(k<=LineList.Line[i-1].Count)do
+            begin
+             if(LineList.Line[i-1].Item[k-1]=')') or (LineList.Line[i-1].Item[k-1]=',') then break;
+             tempstr2:=tempstr2+LineList.Line[i-1].Item[k-1];
+             inc(k);
+            end;
+           tempstr1:=tempstr2;
+           if(length(tempstr1)>=2) then
+            begin
+             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
+              begin
+               inc(Result.DynamicPathWithSubDirectoryCount);
+               SetLength(Result.DynamicPathWithSubDirectoryList,
+               Result.DynamicPathWithSubDirectoryCount);
+               Result.DynamicPathWithSubDirectoryList[
+               Result.DynamicPathWithSubDirectoryCount-1]:=
+               Copy(tempstr1,2,length(tempstr1)-2);
+              end
+             else
+              begin
+               inc(Result.DynamicPathWithSubDirectoryCount);
+               SetLength(Result.DynamicPathWithSubDirectoryList,
+               Result.DynamicPathWithSubDirectoryCount);
+               Result.DynamicPathWithSubDirectoryList[
+               Result.DynamicPathWithSubDirectoryCount-1]:=tempstr1;
+              end;
+            end
+           else
+            begin
+             inc(Result.DynamicPathWithSubDirectoryCount);
+             SetLength(Result.DynamicPathWithSubDirectoryList,
+             Result.DynamicPathWithSubDirectoryCount);
+             Result.DynamicPathWithSubDirectoryList[
+             Result.DynamicPathWithSubDirectoryCount-1]:=tempstr1;
+            end;
+           j:=k+1;
+          end;
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:Dynamic Library Path must be '+
+         'dynamiclibrary_search_withsubdir/dynamiclibrarysearch_withsubdir/'
+         +'dynamiclibrary_search_withsubdir/sharedlibrary_search_withsubdir'
+         +'/sharedlibrarysearch_withsubdir/sharedlibrary_search_withsubdir'
+         +'(LibrarySearchPath(withSubDirectory))');
          readln;
          halt;
         end;

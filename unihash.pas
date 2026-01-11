@@ -2,6 +2,8 @@ unit unihash;
 
 interface
 
+{$mode ObjFPC}{$H+}
+
 type PPointer=^Pointer;
 
 const unihash_magic_number:array[1..16] of Qword=(
