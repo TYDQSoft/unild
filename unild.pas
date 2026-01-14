@@ -51,6 +51,50 @@ begin
   end;
  FindClose(SearchRec);
 end;
+function unild_search_for_directorylist(basepath:string;IncludeSubDir:boolean):unild_filelist;
+var SearchRec:TSearchRec;
+    Signal:longint;
+    i:SizeUint;
+    templist:unild_filelist;
+    ProcessBaseDir:string;
+begin
+ Result.Count:=0; Signal:=-1; ProcessBaseDir:=BasePath;
+ if(length(ProcessBaseDir)>1) and
+ ((ProcessBaseDir[length(ProcessBaseDir)]='\') or (ProcessBaseDir[length(ProcessBaseDir)]='/')) then
+ ProcessBaseDir:=Copy(ProcessBaseDir,1,length(ProcessBaseDir)-1);
+ if(includesubdir) then
+  begin
+   while(True)do
+    begin
+     if(signal<>0) then signal:=FindFirst(ProcessBaseDir,faDirectory,SearchRec)
+     else signal:=FindNext(SearchRec);
+     if(signal<>0) then break;
+     if(SearchRec.Name='..') or (SearchRec.Name='.') then continue;
+     templist:=unild_search_for_directorylist(ProcessBaseDir+'/'+SearchRec.Name,true);
+     i:=1;
+     while(i<=templist.count)do
+      begin
+       inc(Result.count);
+       SetLength(Result.FilePath,Result.count);
+       Result.filePath[Result.count-1]:=templist.filepath[i-1];
+       inc(i);
+      end;
+    end;
+   FindClose(SearchRec);
+  end;
+ signal:=-1;
+ while(True)do
+  begin
+   if(signal<>0) then signal:=FindFirst(ProcessBaseDir,faDirectory,SearchRec)
+   else signal:=FindNext(SearchRec);
+   if(SearchRec.Name='..') or (SearchRec.Name='.') then continue;
+   if(signal<>0) then break;
+   inc(Result.count);
+   SetLength(Result.FilePath,Result.count);
+   Result.FilePath[Result.count-1]:=ProcessBaseDir+'/'+SearchRec.Name;
+  end;
+ FindClose(SearchRec);
+end;
 procedure unild_help;
 begin
  writeln('unild(universal linker editor) version 0.0.1');
@@ -77,7 +121,7 @@ begin
  writeln('  Check the executable stack(ELF Files Only)');
  writeln('--no-writable-got,--no-writablegot,--no-writable,--nowritable,--no-write,--nowrite');
  writeln('  Disable the Writable Got(Global Offset Table) section(ELF Files Only).');
- writeln('--interpreter');
+ writeln('--interpreter,--interp');
  writeln('  Specify the path of the interpreter(ELF dynamic library and ELF executable only).');
  writeln('--output-file-name,--output-filename,--outputfilename');
  writeln('  Specify output file name(Cannot lack,otherwise a error will thrown).');
@@ -95,6 +139,14 @@ begin
  '--sharedlibrary-searchpath,--sharedlibrarysearchpath');
  writeln('  Specify the dynamic library search path for dynamic library(Only available when '+
  'dynamic library specified).');
+ writeln('--dynamic-library-search-path-with-subdir,--dynamic-library-searchpath-withsubdir,'+
+ '--dynamic-library-searchpath-withsubdir,--dynamiclibrary-searchpath-withsubdir,'+
+ '--dynamiclibrarysearchpath-withsubdir,--dynamiclibrarysearchpathwithsubdir,'+
+ '--shared-object-search-path-with-subdir,--shared-object-searchpath-withsubdir,'+
+ '--shared-object-searchpath-withsubdir,--sharedobject-searchpath-withsubdir,'+
+ '--sharedobjectsearchpath-withsubdir,--sharedobjectsearchpathwithsubdir');
+ writeln('  Specify the dynamic library search path for dynamic library with subdirectory'+
+ '(Only available when dynamic library specified).');
  writeln('--baseaddress,--startaddress,--base-address,--start-address');
  writeln('  Specify the base address of the output file.');
  writeln('--filealign,--file-align');
@@ -145,6 +197,20 @@ begin
  writeln('  Specify the Linker Script Path.');
  writeln('--gnu-linux,--gnulinux,--gnu,--linux');
  writeln('  Specify the ELF File Operating System to Linux(ELF File Only).');
+ writeln('--application,--app');
+ writeln('  Specify the EFI File Format to UEFI Application Type(EFI Type must be set for being vaild).');
+ writeln('--boot-driver,--bootdriver,--boot-drv,--bootdrv');
+ writeln('  Specify the EFI File Format to UEFI Boot Driver(EFI Type must be set for being vaild).');
+ writeln('--runtime-driver,--runtimedriver,--run-drv,--rundrv');
+ writeln('  Specify the EFI File Format to UEFI Runtime Driver(EFI Type must be set for being vaild).');
+ writeln('--efi,--uefi');
+ writeln('  Specify the output file is EFI File.');
+ writeln('--binaryalign,--binary-align');
+ writeln('  Specify the untyped binary file align of untyped binary file.');
+ writeln('--disablefilesymbol,--disable-filesymbol,--disable-file-symbol');
+ writeln('  Disable the File Symbol of the Output File.');
+ writeln('--disablesectionsymbol,--disable-sectionsymbol,--disable-section-symbol');
+ writeln('  Disable the Section Symbol of the Output File.');
  writeln('--help');
  writeln('  Show the help of the unild.');
 end;
@@ -173,7 +239,8 @@ begin
     begin
      Verbose:=true;
     end
-   else if(LowerCase(ParamStr(i))='--untypedbinary') or (LowerCase(ParamStr(i))='--binary') then
+   else if(LowerCase(ParamStr(i))='--untypedbinary') or (LowerCase(ParamStr(i))='--binary')
+   or(LowerCase(ParamStr(i))='--untyped') or(LowerCase(ParamStr(i))='--notype') then
     begin
      Script.IsUntypedBinary:=true;
     end
@@ -187,6 +254,18 @@ begin
    or(LowerCase(ParamStr(i))='--smartlink') then
     begin
      Script.SmartLinking:=true; Script.LinkAll:=false;
+    end
+   else if(LowerCase(ParamStr(i))='--disablefilesymbol') or
+   (LowerCase(ParamStr(i))='--disable-filesymbol') or
+   (LowerCase(ParamStr(i))='--disable-file-symbol') then
+    begin
+     Script.EnableFileInformation:=true;
+    end
+   else if(LowerCase(ParamStr(i))='--disablesectionsymbol') or
+   (LowerCase(ParamStr(i))='--disable-sectionsymbol') or
+   (LowerCase(ParamStr(i))='--disable-section-symbol') then
+    begin
+     Script.EnableSectionInformation:=true;
     end
    else if(LowerCase(ParamStr(i))='--linkallsection') or (LowerCase(ParamStr(i))='--linkallsect')
    or(LowerCase(ParamStr(i))='--nosmartlinking') or(LowerCase(ParamStr(i))='--linkall')
@@ -217,10 +296,28 @@ begin
     begin
      Script.NoGotWritable:=true;
     end
-   else if(LowerCase(ParamStr(i))='--interpreter') then
+   else if(LowerCase(ParamStr(i))='--interpreter') or (LowerCase(ParamStr(i))='--interp') then
     begin
-     Script.Interpreter:=ParamStr(i+1);
-     inc(i);
+     j:=i+1;
+     while(j<=ParamCount)do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
+       else if(length(tempstr)>2) then
+        begin
+         if(FileExists(tempstr)) and (Script.Interpreter='') then
+          begin
+           Script.Interpreter:=tempstr;
+          end
+         else
+          begin
+           inc(j); continue;
+          end;
+        end
+       else break;
+       inc(j);
+      end;
+     i:=j;
     end
    else if(LowerCase(ParamStr(i))='--output-file-name')
    or(LowerCase(ParamStr(i))='--output-filename')
@@ -231,20 +328,42 @@ begin
     end
    else if(LowerCase(ParamStr(i))='--input-file') or (LowerCase(ParamStr(i))='--inputfile') then
     begin
-     inc(Script.InputFileCount);
-     SetLength(Script.InputFile,Script.InputFileCount);
-     Script.InputFile[Script.InputFileCount-1]:=ParamStr(i+1);
-     inc(i);
+     j:=i+1;
+     while(j<=ParamCount) do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
+       else if(length(tempstr)>2) then
+        begin
+         inc(Script.InputFileCount);
+         SetLength(Script.InputFile,Script.InputFileCount);
+         Script.InputFile[Script.InputFileCount-1]:=ParamStr(j);
+        end
+       else break;
+       inc(j);
+      end;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--input-file-path') or (LowerCase(ParamStr(i))='--input-filepath')
    or(LowerCase(ParamStr(i))='--inputfilepath') then
     begin
-     inc(Script.InputFilePathCount);
-     SetLength(Script.InputFilePath,Script.InputFilePathCount);
-     SetLength(Script.InputFileHaveSubPath,Script.InputFilePathCount);
-     Script.InputFilePath[Script.InputFilePathCount-1]:=ParamStr(i+1);
-     Script.InputFileHaveSubPath[Script.InputFilePathCount-1]:=false;
-     inc(i);
+     j:=i+1;
+     while(j<=ParamCount) do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
+       else if(length(tempstr)>2) then
+        begin
+         inc(Script.InputFilePathCount);
+         SetLength(Script.InputFilePath,Script.InputFilePathCount);
+         SetLength(Script.InputFileHaveSubPath,Script.InputFilePathCount);
+         Script.InputFilePath[Script.InputFilePathCount-1]:=tempstr;
+         Script.InputFileHaveSubPath[Script.InputFilePathCount-1]:=false;
+        end
+       else break;
+       inc(j);
+      end;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--input-file-path-with-subdir')
    or(LowerCase(ParamStr(i))='--input-filepath-with-subdir')
@@ -253,22 +372,44 @@ begin
    or(LowerCase(ParamStr(i))='--input-filepath-withsubdir')
    or(LowerCase(ParamStr(i))='--inputfilepath-withsubdir') then
     begin
-     inc(Script.InputFilePathCount);
-     SetLength(Script.InputFilePath,Script.InputFilePathCount);
-     SetLength(Script.InputFileHaveSubPath,Script.InputFilePathCount);
-     Script.InputFilePath[Script.InputFilePathCount-1]:=ParamStr(i+1);
-     Script.InputFileHaveSubPath[Script.InputFilePathCount-1]:=true;
-     inc(i);
+     j:=i+1;
+     while(j<=ParamCount) do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
+       else if(length(tempstr)>2) then
+        begin
+         inc(Script.InputFilePathCount);
+         SetLength(Script.InputFilePath,Script.InputFilePathCount);
+         SetLength(Script.InputFileHaveSubPath,Script.InputFilePathCount);
+         Script.InputFilePath[Script.InputFilePathCount-1]:=tempstr;
+         Script.InputFileHaveSubPath[Script.InputFilePathCount-1]:=true;
+        end
+       else break;
+       inc(j);
+      end;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--dynamic-library') or
    (LowerCase(ParamStr(i))='--dynamiclibrary') or
    (LowerCase(ParamStr(i))='--shared-library') or
    (LowerCase(ParamStr(i))='--sharedlibrary') then
     begin
-     inc(Script.DynamicCount);
-     SetLength(Script.DynamicLibrary,Script.DynamicCount);
-     Script.DynamicLibrary[Script.DynamicCount-1]:=ParamStr(i+1);
-     inc(i);
+     j:=i+1;
+     while(j<=ParamCount) do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
+       else if(length(tempstr)>2) then
+        begin
+         inc(Script.DynamicCount);
+         SetLength(Script.DynamicLibrary,Script.DynamicCount);
+         Script.DynamicLibrary[Script.DynamicCount-1]:=tempstr;
+        end
+       else break;
+       inc(j);
+      end;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--dynamic-library-search-path') or
    (LowerCase(ParamStr(i))='--dynamiclibrary-search-path') or
@@ -279,10 +420,50 @@ begin
    (LowerCase(ParamStr(i))='--sharedlibrary-searchpath') or
    (LowerCase(ParamStr(i))='--sharedlibrarysearchpath')  then
     begin
-     inc(Script.DynamicPathCount);
-     SetLength(Script.DynamicLibraryPath,Script.DynamicPathCount);
-     Script.DynamicLibraryPath[Script.DynamicPathCount-1]:=ParamStr(i+1);
-     inc(i);
+     j:=i+1;
+     while(j<=ParamCount) do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
+       else if(length(tempstr)>2) then
+        begin
+         inc(Script.DynamicPathCount);
+         SetLength(Script.DynamicLibraryPath,Script.DynamicPathCount);
+         Script.DynamicLibraryPath[Script.DynamicPathCount-1]:=ParamStr(j);
+        end
+       else break;
+       inc(j);
+      end;
+     i:=j; continue;
+    end
+   else if(LowerCase(ParamStr(i))='--dynamic-library-search-path-with-subdir') or
+   (LowerCase(ParamStr(i))='--dynamic-library-searchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--dynamic-library-searchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--dynamiclibrary-searchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--dynamiclibrarysearchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--dynamiclibrarysearchpathwithsubdir') or
+   (LowerCase(ParamStr(i))='--shared-object-search-path-with-subdir') or
+   (LowerCase(ParamStr(i))='--shared-object-searchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--shared-object-searchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--sharedobject-searchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--sharedobjectsearchpath-withsubdir') or
+   (LowerCase(ParamStr(i))='--sharedobjectsearchpathwithsubdir') then
+    begin
+     j:=i+1;
+     while(j<=ParamCount) do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
+       else if(length(tempstr)>2) then
+        begin
+         inc(Script.DynamicPathWithSubDirectoryCount);
+         SetLength(Script.DynamicPathWithSubDirectoryList,Script.DynamicPathWithSubDirectoryCount);
+         Script.DynamicPathWithSubDirectoryList[Script.DynamicPathWithSubDirectoryCount-1]:=tempstr;
+        end
+       else break;
+       inc(j);
+      end;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--baseaddress') or (LowerCase(ParamStr(i))='--startaddress')
    or(LowerCase(ParamStr(i))='--base-address') or (LowerCase(ParamStr(i))='--start-address') then
@@ -293,6 +474,11 @@ begin
    else if(LowerCase(ParamStr(i))='--filealign') or (LowerCase(ParamStr(i))='--file-align') then
     begin
      Script.FileAlign:=unild_str_to_int(ParamStr(i+1));
+     inc(i);
+    end
+   else if(LowerCase(ParamStr(i))='--binaryalign') or (LowerCase(ParamStr(i))='--binary-align') then
+    begin
+     Script.UntypedBinaryAlign:=unild_str_to_int(ParamStr(i+1));
      inc(i);
     end
    else if(LowerCase(ParamStr(i))='--untypedbinaryalign') or
@@ -340,6 +526,28 @@ begin
    else if(LowerCase(ParamStr(i))='--executable') then
     begin
      Script.elfclass:=unild_class_executable;
+    end
+   else if(LowerCase(ParamStr(i))='--uefi') or (LowerCase(ParamStr(i))='--efi') then
+    begin
+     Script.IsEFIFile:=true;
+    end
+   else if(LowerCase(ParamStr(i))='--application') or (LowerCase(ParamStr(i))='--app') then
+    begin
+     Script.EFIFileIndex:=unild_class_application;
+    end
+   else if(LowerCase(ParamStr(i))='--boot-driver') or (LowerCase(ParamStr(i))='--bootdriver')
+   or(LowerCase(ParamStr(i))='--boot-drv') or (LowerCase(ParamStr(i))='--bootdrv') then
+    begin
+     Script.EFIFileIndex:=unild_class_bootdriver;
+    end
+   else if(LowerCase(ParamStr(i))='--runtime-driver') or (LowerCase(ParamStr(i))='--runtimedriver')
+   or(LowerCase(ParamStr(i))='--run-drv') or (LowerCase(ParamStr(i))='--rundrv') then
+    begin
+     Script.EFIFileIndex:=unild_class_runtimedriver;
+    end
+   else if(LowerCase(ParamStr(i))='--rom') then
+    begin
+     Script.EFIFileIndex:=unild_class_rom;
     end
    else if(LowerCase(ParamStr(i))='--fixed-address') or (LowerCase(ParamStr(i))='--fixedaddress')
    or(LowerCase(ParamStr(i))='--fixed-addr') or (LowerCase(ParamStr(i))='--fixedaddr') then
@@ -571,6 +779,21 @@ begin
      halt;
     end;
   end;
+ if(Script.DynamicPathWithSubDirectoryCount>0) then
+  begin
+   for i:=1 to Script.DynamicPathWithSubDirectoryCount do
+    begin
+     FileList:=unild_search_for_directorylist(Script.DynamicPathWithSubDirectoryList[i-1],true);
+     for j:=1 to FileList.Count do
+      begin
+       inc(Script.DynamicPathCount);
+       SetLength(Script.DynamicLibraryPath,Script.DynamicPathCount);
+       Script.DynamicLibraryPath[Script.DynamicPathCount-1]:=FileList.FilePath[j-1];
+      end;
+    end;
+   SetLength(Script.DynamicPathWithSubDirectoryList,0);
+   Script.DynamicPathWithSubDirectoryCount:=0;
+  end;
  if(Script.NoExternalLibrary=false) then
   begin
    if(Script.Interpreter='') then
@@ -579,29 +802,38 @@ begin
      readln;
      halt;
     end;
-   if(Script.DynamicCount>0) then
+   if(Script.DynamicCount=0) then
     begin
      writeln('ERROR:Demanding Dynamic Library not specified.');
      readln;
      halt;
     end;
-   if(Script.DynamicPathCount>0) then
+   if(Script.DynamicPathCount=0) then
     begin
      writeln('ERROR:Dynamic Library Search Path specified.');
      readln;
      halt;
     end;
+  end
+ else
+  begin
+   Script.Interpreter:=''; Script.DynamicCount:=0; Script.DynamicPathCount:=0;
   end;
  {Then Input the File}
+ unifile_filelist_initialize;
  unifile_total_file_initialize(InputFileList);
  if(Verbose) then writeln('Reading the input files......');
  for i:=1 to Script.InputFileCount do
   begin
    tempstr:=LowerCase(ExtractFileExt(Script.InputFile[i-1]));
    if(tempstr='.o')or (tempstr='.obj') then
-   unifile_total_add_file(InputFileList,unifile_read_elf_file(Script.InputFile[i-1]))
+    begin
+     unifile_total_add_file(InputFileList,unifile_read_elf_file(Script.InputFile[i-1]));
+    end
    else if(tempstr='.a')or (tempstr='.lib') or (tempstr='.lib') then
-   unifile_total_add_archive_file(InputFileList,unifile_read_archive_file(Script.InputFile[i-1]));
+    begin
+     unifile_total_add_archive_file(InputFileList,unifile_read_archive_file(Script.InputFile[i-1]));
+    end;
   end;
  for i:=1 to Script.InputFilePathCount do
   begin
@@ -651,6 +883,18 @@ begin
  if(OutputFileName='') then
   begin
    writeln('ERROR:No Output File Name Specified.');
+   readln;
+   halt;
+  end;
+ if(Script.elfclass=0) and (Script.IsUntypedBinary=false) and (Script.IsEFIFile=false) then
+  begin
+   writeln('ERROR:ELF File Type not Specified.');
+   readln;
+   halt;
+  end;
+ if(Script.EFIFileIndex=0) and (Script.IsUntypedBinary=false) and (Script.IsEFIFile) then
+  begin
+   writeln('ERROR:EFI File Type not Specified.');
    readln;
    halt;
   end;

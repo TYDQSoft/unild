@@ -113,7 +113,8 @@
 	if [ "$CUSTOMBIN" != "" ]; then
 	 BUNAME="-XP"$CUSTOMBIN
 	fi
-	/home/tydq/source/compiler/ppc$CARCH -Mobjfpc -n -O1 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CARCHNAME/units/$CARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CARCHNAME-linux -dcpu$BITS -Cg unild.pas
+	/home/tydq/source/compiler/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -Cg unild.pas
 	rm *.ppu 
 	rm *.o
 	./unild --help
+	#/home/tydq/unild/unild --linker-script /home/tydq/unild/linkerscript.txt --input-file-path-with-subdir /home/tydq/BenchMark/Objects --output-filename lookup.elf --entry _start --verbose --noextlibrary --smartlinking --executable

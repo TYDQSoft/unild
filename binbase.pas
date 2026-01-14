@@ -1466,10 +1466,10 @@ const elf_magic:array[1..4] of char=(#$7F,'E','L','F');
       elf_reloc_loongarch_absolute_low_12bit=68;
       elf_reloc_loongarch_absolute_64bit_low_20bit=69;
       elf_reloc_loongarch_absolute_64bit_high_12bit=70;
-      elf_reloc_loongarch_absolute_pcala_high_20bit=71;
-      elf_reloc_loongarch_absolute_pcala_low_12bit=72;
-      elf_reloc_loongarch_absolute_pcala64_low_20bit=73;
-      elf_reloc_loongarch_absolute_pcala64_high_12bit=74;
+      elf_reloc_loongarch_pcala_high_20bit=71;
+      elf_reloc_loongarch_pcala_low_12bit=72;
+      elf_reloc_loongarch_pcala64_low_20bit=73;
+      elf_reloc_loongarch_pcala64_high_12bit=74;
       elf_reloc_loongarch_got_pc_high_20bit=75;
       elf_reloc_loongarch_got_pc_low_12bit=76;
       elf_reloc_loongarch_got64_pc_low_20bit=77;
@@ -1633,9 +1633,10 @@ const elf_magic:array[1..4] of char=(#$7F,'E','L','F');
       coff_image_symbol_class_block:byte=100;
       coff_image_symbol_class_function:byte=101;
       coff_image_symbol_class_end_of_struct:byte=102;
-      coff_image_symbol_class_section:byte=103;
-      coff_image_symbol_class_weak_external:byte=104;
-      coff_image_symbol_class_clr_token:byte=105;
+      coff_image_symbol_class_file:byte=103;
+      coff_image_symbol_class_section:byte=104;
+      coff_image_symbol_class_weak_external:byte=105;
+      coff_image_symbol_class_clr_token:byte=107;
       {Coff Image Base Relocation Type}
       coff_image_base_relocation_absolute:byte=0;
       coff_image_base_relocation_high:byte=1;
@@ -1791,10 +1792,10 @@ begin
  if(datasize=0) or (data=nil) then exit(0)
  else
   begin
-   sum:=0; checksum:=0; i:=1;
-   while(i<=datasize)do
+   sum:=0; checksum:=0; i:=0;
+   while(i<datasize)do
     begin
-     sum:=Pword(data+i shl 1-2)^+checksum;
+     sum:=Pword(data+i)^+checksum;
      checksum:=Word(sum)+sum shr 16;
      inc(i,2);
     end;
@@ -1803,4 +1804,3 @@ begin
 end;
 
 end.
-

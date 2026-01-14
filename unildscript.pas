@@ -58,6 +58,8 @@ type unild_item=packed record
                   Section:array of unild_section;
                   SectionCount:Word;
                   OutputFormat:string;
+                  EnableFileInformation:boolean;
+                  EnableSectionInformation:boolean;
                   {Temporary Variables}
                   DynamicPathWithSubDirectoryList:array of string;
                   DynamicPathWithSubDirectoryCount:SizeUint;
@@ -109,6 +111,7 @@ begin
  Script.NoExecutableStack:=false; Script.NoGotWritable:=false; Script.UntypedBinaryAlign:=0;
  Script.InputFormat:=''; Script.OutputFormat:=''; Script.IsUntypedBinary:=false;
  Script.DynamicPathWithSubDirectoryCount:=0;
+ Script.EnableFileInformation:=true; Script.EnableSectionInformation:=true;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -337,7 +340,7 @@ var i,j,len:SizeUint;
     tempstr:string;
     bool:boolean;
 begin
- i:=1; len:=length(content); tempstr:=''; StartPoint:=1;
+ i:=1; len:=length(content); tempstr:=''; StartPoint:=1; bool:=false;
  Result.Count:=0; SetLength(Result.Item,0); SetLength(Result.Offset,0);
  while(i<=len)do
   begin
@@ -591,6 +594,18 @@ begin
       begin
        Result.NoExecutableStack:=true;
       end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='disablefilesymbol') or
+     (LowerCase(LineList.Line[i-1].Item[0])='disable-filesymbol') or
+     (LowerCase(LineList.Line[i-1].Item[0])='disable-file-symbol') then
+      begin
+       Result.EnableFileInformation:=false;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='disablesectionsymbol') or
+     (LowerCase(LineList.Line[i-1].Item[0])='disable-sectionsymbol') or
+     (LowerCase(LineList.Line[i-1].Item[0])='disable-section-symbol') then
+      begin
+       Result.EnableSectionInformation:=false;
+      end
      else if(LowerCase(LineList.Line[i-1].Item[0])='nogotwritable') or
      (LowerCase(LineList.Line[i-1].Item[0])='gotnotwriteable') then
       begin
@@ -765,24 +780,38 @@ begin
          halt;
         end;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='interpreter') then
+     else if(LowerCase(LineList.Line[i-1].Item[0])='interpreter') or
+     (LowerCase(LineList.Line[i-1].Item[0])='interpret') then
       begin
-       if(LineList.Line[i-1].Count=4) and (Result.Interpreter='') then
+       if(LineList.Line[i-1].Count>=4) and (Result.Interpreter='') then
         begin
-         tempstr1:=LineList.Line[i-1].Item[2];
-         if(length(tempstr1)>=2) then
+         j:=3; k:=4;
+         while(j<=LineList.Line[i-1].Count)do
           begin
-           if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-           Result.Interpreter:=Copy(tempstr1,2,length(tempstr1)-2)
-           else
-           Result.Interpreter:=tempstr1;
-          end
-         else Result.Interpreter:=tempstr1;
+           k:=j+1; tempstr2:=LineList.Line[i-1].Item[j-1];
+           while(k<=LineList.Line[i-1].Count)do
+            begin
+             if(LineList.Line[i-1].Item[k-1]=')') or (LineList.Line[i-1].Item[k-1]=',') then break;
+             tempstr2:=tempstr2+LineList.Line[i-1].Item[k-1];
+             inc(k);
+            end;
+           tempstr1:=tempstr2;
+           if(length(tempstr1)>=2) then
+            begin
+             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
+             Result.Interpreter:=Copy(tempstr1,2,length(tempstr1)-2)
+             else Result.Interpreter:=tempstr1;
+            end
+           else Result.Interpreter:=tempstr1;
+           if(FileExists(Result.Interpreter)) then break;
+           j:=k+1;
+          end;
         end
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Interpreter Name must be interpreter(interpretername) and not define at least twice.');
+         writeln('ERROR:Interpreter Name must be '+
+         'interpreter/interp(interpretername) and not define at least twice.');
          readln;
          halt;
         end;
@@ -1015,17 +1044,17 @@ begin
       begin
        if(LineList.LineCount>=4) then
         begin
-         j:=3;
-         while(j<=LineList.LineCount)do
+         j:=3; k:=4;
+         while(j<=LineList.Line[i-1].Count)do
           begin
-           tempstr1:=LineList.Line[i-1].Item[j-1];
-           if(tempstr1=')') or (tempstr1='(') or (tempstr1=',') then
+           k:=j+1; tempstr2:=LineList.Line[i-1].Item[j-1];
+           while(k<=LineList.Line[i-1].Count)do
             begin
-             writeln('ERROR in Column '+IntToStr(i)+' ,Row '+IntToStr(j));
-             writeln('ERROR:Input FileName must be not '+tempstr1);
-             readln;
-             halt;
+             if(LineList.Line[i-1].Item[k-1]=')') or (LineList.Line[i-1].Item[k-1]=',') then break;
+             tempstr2:=tempstr2+LineList.Line[i-1].Item[k-1];
+             inc(k);
             end;
+           tempstr1:=tempstr2;
            if(length(tempstr1)>2) then
             begin
              if(tempstr1[1]='"') or (tempstr1[1]=#39) then tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
@@ -1033,7 +1062,7 @@ begin
            inc(Result.InputFileCount);
            SetLength(Result.InputFile,Result.InputFileCount);
            Result.InputFile[Result.InputFileCount-1]:=tempstr1;
-           inc(j,2);
+           j:=k+1;
           end;
         end
        else if(LineList.Line[i-1].Count=3) then
@@ -1059,17 +1088,17 @@ begin
       begin
        if(LineList.LineCount>=4) then
         begin
-         j:=3;
-         while(j<=LineList.LineCount)do
+         j:=3; k:=4;
+         while(j<=LineList.Line[i-1].Count)do
           begin
-           tempstr1:=LineList.Line[i-1].Item[j-1];
-           if(tempstr1=')') or (tempstr1='(') or (tempstr1=',') then
+           k:=j+1; tempstr2:=LineList.Line[i-1].Item[j-1];
+           while(k<=LineList.Line[i-1].Count)do
             begin
-             writeln('ERROR in Column '+IntToStr(i)+' ,Row '+IntToStr(j));
-             writeln('ERROR:Input FileName must be not '+tempstr1);
-             readln;
-             halt;
+             if(LineList.Line[i-1].Item[k-1]=')') or (LineList.Line[i-1].Item[k-1]=',') then break;
+             tempstr2:=tempstr2+LineList.Line[i-1].Item[k-1];
+             inc(k);
             end;
+           tempstr1:=tempstr2;
            if(length(tempstr1)>2) then
             begin
              if(tempstr1[1]='"') or (tempstr1[1]=#39) then tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
@@ -1079,7 +1108,7 @@ begin
            SetLength(Result.InputFileHaveSubPath,Result.InputFilePathCount);
            Result.InputFilePath[Result.InputFilePathCount-1]:=tempstr1;
            Result.InputFileHaveSubPath[Result.InputFilePathCount-1]:=false;
-           inc(j,2);
+           j:=k+1;
           end;
         end
        else if(LineList.Line[i-1].Count=3) then
@@ -1112,16 +1141,17 @@ begin
        if(LineList.LineCount>=4) then
         begin
          j:=3;
-         while(j<=LineList.LineCount)do
+         j:=3; k:=4;
+         while(j<=LineList.Line[i-1].Count)do
           begin
-           tempstr1:=LineList.Line[i-1].Item[j-1];
-           if(tempstr1=')') or (tempstr1='(') or (tempstr1=',') then
+           k:=j+1; tempstr2:=LineList.Line[i-1].Item[j-1];
+           while(k<=LineList.Line[i-1].Count)do
             begin
-             writeln('ERROR in Column '+IntToStr(i)+' ,Row '+IntToStr(j));
-             writeln('ERROR:Input FileName must be not '+tempstr1);
-             readln;
-             halt;
+             if(LineList.Line[i-1].Item[k-1]=')') or (LineList.Line[i-1].Item[k-1]=',') then break;
+             tempstr2:=tempstr2+LineList.Line[i-1].Item[k-1];
+             inc(k);
             end;
+           tempstr1:=tempstr2;
            if(length(tempstr1)>2) then
             begin
              if(tempstr1[1]='"') or (tempstr1[1]=#39) then tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
@@ -1131,7 +1161,7 @@ begin
            SetLength(Result.InputFileHaveSubPath,Result.InputFilePathCount);
            Result.InputFilePath[Result.InputFilePathCount-1]:=tempstr1;
            Result.InputFileHaveSubPath[Result.InputFilePathCount-1]:=true;
-           inc(j,2);
+           j:=k+1;
           end;
         end
        else if(LineList.Line[i-1].Count=3) then
