@@ -29,6 +29,7 @@ type unild_item=packed record
                   IsUntypedBinary:boolean;
                   UntypedBinaryAlign:Dword;
                   Interpreter:string;
+                  InterpreterDynamicLinkFunction:string;
                   FileAlign:SizeUint;
                   Symbolic:boolean;
                   SmartLinking:boolean;
@@ -57,9 +58,16 @@ type unild_item=packed record
                   Bits:byte;
                   Section:array of unild_section;
                   SectionCount:Word;
+                  SectionCountExtra:Word;
                   OutputFormat:string;
                   EnableFileInformation:boolean;
                   EnableSectionInformation:boolean;
+                  DynamicSectionAlias:string;
+                  DynamicSectionEnable:boolean;
+                  DynamicSectionIndex:word;
+                  GlobalOffsetTableAlias:string;
+                  GlobalOffsetTableSectionEnable:boolean;
+                  GlobalOffsetTableSectionIndex:word;
                   {Temporary Variables}
                   DynamicPathWithSubDirectoryList:array of string;
                   DynamicPathWithSubDirectoryCount:SizeUint;
@@ -95,6 +103,7 @@ function unild_script_match_mask(checkstr:string;mask:string):boolean;
 function unild_translate_string(str:string):string;
 function unild_str_to_int(str:string):SizeUint;
 function unild_script_read(filename:string):unild_script;
+function unild_generate_default:unild_script;
 
 implementation
 
@@ -104,6 +113,7 @@ begin
  Script.NoSymbol:=false; Script.BaseAddress:=0;
  Script.DynamicCount:=0; Script.DynamicPathCount:=0; Script.EFIFileIndex:=0;
  Script.elfclass:=0; Script.Interpreter:='';
+ Script.InterpreterDynamicLinkFunction:='_dl_runtime_resolve';
  Script.InputFilePathCount:=0; Script.InputFileCount:=0;
  Script.EntryName:=''; Script.FileAlign:=0; Script.NoDefaultLibrary:=false;
  Script.NoExternalLibrary:=false; Script.NoSymbol:=false; Script.NoFixedAddress:=true;
@@ -112,6 +122,10 @@ begin
  Script.InputFormat:=''; Script.OutputFormat:=''; Script.IsUntypedBinary:=false;
  Script.DynamicPathWithSubDirectoryCount:=0;
  Script.EnableFileInformation:=true; Script.EnableSectionInformation:=true;
+ Script.DynamicSectionAlias:='_DYNAMIC';
+ Script.DynamicSectionEnable:=false; Script.DynamicSectionIndex:=0;
+ Script.GlobalOffsetTableAlias:='_GLOBAL_OFFSET_TABLE_';
+ Script.GlobalOffsetTableSectionEnable:=false; Script.GlobalOffsetTableSectionIndex:=0;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -423,7 +437,9 @@ begin
    if(mask[j]='*') then
     begin
      while(j<=len2) and (mask[j]='*') do inc(j);
+     if(j>len2) then exit(True);
      while(i<=len1) and (checkstr[i]<>mask[j]) do inc(i);
+     if(i>len1) then exit(True);
      continue;
     end
    else if(mask[j]='?') then
@@ -595,14 +611,14 @@ begin
        Result.NoExecutableStack:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='disablefilesymbol') or
-     (LowerCase(LineList.Line[i-1].Item[0])='disable-filesymbol') or
-     (LowerCase(LineList.Line[i-1].Item[0])='disable-file-symbol') then
+     (LowerCase(LineList.Line[i-1].Item[0])='disable_filesymbol') or
+     (LowerCase(LineList.Line[i-1].Item[0])='disable_file_symbol') then
       begin
        Result.EnableFileInformation:=false;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='disablesectionsymbol') or
-     (LowerCase(LineList.Line[i-1].Item[0])='disable-sectionsymbol') or
-     (LowerCase(LineList.Line[i-1].Item[0])='disable-section-symbol') then
+     (LowerCase(LineList.Line[i-1].Item[0])='disable_sectionsymbol') or
+     (LowerCase(LineList.Line[i-1].Item[0])='disable_section_symbol') then
       begin
        Result.EnableSectionInformation:=false;
       end
@@ -627,6 +643,16 @@ begin
       begin
        Result.elfclass:=unild_class_sharedobject;
       end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='got_enable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='gotenable') then
+      begin
+       Result.GlobalOffsetTableSectionEnable:=true;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='dynamic_enable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='dynamicenable') then
+      begin
+       Result.DynamicSectionEnable:=true;
+      end
      else if(LowerCase(LineList.Line[i-1].Item[0])='relocatable') then
       begin
        Result.elfclass:=unild_class_relocatable;
@@ -643,7 +669,9 @@ begin
       begin
        Result.NoSymbol:=true;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='linkall') then
+     else if(LowerCase(LineList.Line[i-1].Item[0])='linkall') or
+     (LowerCase(LineList.Line[i-1].Item[0])='nosmartlink') or
+     (LowerCase(LineList.Line[i-1].Item[0])='nosmartlinking') then
       begin
        Result.LinkAll:=true; Result.SmartLinking:=false;
       end
@@ -651,7 +679,8 @@ begin
       begin
        Result.IsUntypedBinary:=true;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='smartlinking') then
+     else if(LowerCase(LineList.Line[i-1].Item[0])='smartlinking') or
+     (LowerCase(LineList.Line[i-1].Item[0])='smartlink') then
       begin
        Result.SmartLinking:=true; Result.LinkAll:=false;
       end
@@ -662,46 +691,80 @@ begin
        Result.SystemIndex:=1;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='efiapplication')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-application')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-app')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_application')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_app')
      or(LowerCase(LineList.Line[i-1].Item[0])='efiapp')
-     or(LowerCase(LineList.Line[i-1].Item[0])='uefi-application')
+     or(LowerCase(LineList.Line[i-1].Item[0])='uefi_application')
      or(LowerCase(LineList.Line[i-1].Item[0])='uefiapplication')then
       begin
        Result.IsEFIFile:=true; Result.EFIFileIndex:=unild_class_application;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='efirom')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-rom')
-     or(LowerCase(LineList.Line[i-1].Item[0])='uefi-rom')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_rom')
+     or(LowerCase(LineList.Line[i-1].Item[0])='uefi_rom')
      or(LowerCase(LineList.Line[i-1].Item[0])='uefirom')then
       begin
        Result.IsEFIFile:=true; Result.EFIFileIndex:=unild_class_rom;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='efibootdriver')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-bootdriver')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-boot-driver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_bootdriver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_boot_driver')
      or(LowerCase(LineList.Line[i-1].Item[0])='efibootdrv')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-bootdrv')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-boot-drv')
-     or(LowerCase(LineList.Line[i-1].Item[0])='uefi-boot-driver')
-     or(LowerCase(LineList.Line[i-1].Item[0])='uefi-bootdriver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_bootdrv')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_boot_drv')
+     or(LowerCase(LineList.Line[i-1].Item[0])='uefi_boot_driver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='uefi_bootdriver')
      or(LowerCase(LineList.Line[i-1].Item[0])='uefibootdriver')then
       begin
        Result.IsEFIFile:=true; Result.EFIFileIndex:=unild_class_bootdriver;
        Result.NoExternalLibrary:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='efiruntimedriver')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-runtimedriver')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-runtime-driver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtimedriver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtime_driver')
      or(LowerCase(LineList.Line[i-1].Item[0])='efiruntimedrv')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-runtimedrv')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi-runtime-drv')
-     or(LowerCase(LineList.Line[i-1].Item[0])='uefi-runtime-driver')
-     or(LowerCase(LineList.Line[i-1].Item[0])='uefi-runtimedriver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtimedrv')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtime-drv')
+     or(LowerCase(LineList.Line[i-1].Item[0])='uefi_runtime_driver')
+     or(LowerCase(LineList.Line[i-1].Item[0])='uefi_runtimedriver')
      or(LowerCase(LineList.Line[i-1].Item[0])='uefiruntimedriver')then
       begin
        Result.IsEFIFile:=true; Result.EFIFileIndex:=unild_class_runtimedriver;
        Result.NoExternalLibrary:=true;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='gotalias')
+     or(LowerCase(LineList.Line[i-1].Item[0])='got_alias') then
+      begin
+       if(LineList.Line[i-1].Count=4) then
+        begin
+         tempstr1:=LineList.Line[i-1].Item[2];
+         Result.GlobalOffsetTableAlias:=tempstr1;
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:GOT(Global Offset Table) Alias '+
+         'must be gotalias/got_alias(alignvalue).');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='dynamicalias')
+     or(LowerCase(LineList.Line[i-1].Item[0])='dynamic_alias') then
+      begin
+       if(LineList.Line[i-1].Count=4) then
+        begin
+         tempstr1:=LineList.Line[i-1].Item[2];
+         Result.DynamicSectionAlias:=tempstr1;
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:Dynamic Section Alias '+
+         'must be dynamicalias/dynamic_alias(alignvalue).');
+         readln;
+         halt;
+        end;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='filealign')
      or(LowerCase(LineList.Line[i-1].Item[0])='file_align') then
@@ -758,7 +821,9 @@ begin
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='entry')
      or(LowerCase(LineList.Line[i-1].Item[0])='entry_name')
-     or(LowerCase(LineList.Line[i-1].Item[0])='entryname') then
+     or(LowerCase(LineList.Line[i-1].Item[0])='entry_symbol')
+     or(LowerCase(LineList.Line[i-1].Item[0])='entryname')
+     or(LowerCase(LineList.Line[i-1].Item[0])='entrysymbol') then
       begin
        if(LineList.Line[i-1].Count=4) then
         begin
@@ -775,15 +840,16 @@ begin
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Entry Name must be entry/entry_name/entryname(entryname)');
+         writeln('ERROR:Entry Name must be entry/entry_name/entryname/entry_symbol/entrysymbol'+
+         '(entryname)');
          readln;
          halt;
         end;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='interpreter') or
-     (LowerCase(LineList.Line[i-1].Item[0])='interpret') then
+     (LowerCase(LineList.Line[i-1].Item[0])='interp') then
       begin
-       if(LineList.Line[i-1].Count>=4) and (Result.Interpreter='') then
+       if(LineList.Line[i-1].Count>=4) then
         begin
          j:=3; k:=4;
          while(j<=LineList.Line[i-1].Count)do
@@ -810,8 +876,48 @@ begin
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Interpreter Name must be '+
-         'interpreter/interp(interpretername) and not define at least twice.');
+         writeln('ERROR:Interpreter Name must be interpreter/interp(interpretername).');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='interpreter_need_function') or
+     (LowerCase(LineList.Line[i-1].Item[0])='interpreter_needfunction') or
+     (LowerCase(LineList.Line[i-1].Item[0])='interpreterneedfunction') or
+     (LowerCase(LineList.Line[i-1].Item[0])='interp_need_function') or
+     (LowerCase(LineList.Line[i-1].Item[0])='interp_needfunction') or
+     (LowerCase(LineList.Line[i-1].Item[0])='interpneedfunction') then
+      begin
+       if(LineList.Line[i-1].Count>=4) then
+        begin
+         j:=3; k:=4;
+         while(j<=LineList.Line[i-1].Count)do
+          begin
+           k:=j+1; tempstr2:=LineList.Line[i-1].Item[j-1];
+           while(k<=LineList.Line[i-1].Count)do
+            begin
+             if(LineList.Line[i-1].Item[k-1]=')') or (LineList.Line[i-1].Item[k-1]=',') then break;
+             tempstr2:=tempstr2+LineList.Line[i-1].Item[k-1];
+             inc(k);
+            end;
+           tempstr1:=tempstr2;
+           if(length(tempstr1)>=2) then
+            begin
+             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
+             Result.InterpreterDynamicLinkFunction:=Copy(tempstr1,2,length(tempstr1)-2)
+             else Result.InterpreterDynamicLinkFunction:=tempstr1;
+            end
+           else Result.InterpreterDynamicLinkFunction:=tempstr1;
+           j:=k+1;
+          end;
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:Interpreter Needed Function Name must be '+
+         'interpreter_need_function/interpreter_needfunction/interpreterneedfunction'+
+         'interp_need_function/interp_needfunction/interpneedfunction'+
+         '(interpretername).');
          readln;
          halt;
         end;
@@ -1018,7 +1124,7 @@ begin
      else if(LowerCase(LineList.Line[i-1].Item[0])='output_format')
      or(LowerCase(LineList.Line[i-1].Item[0])='outputformat') then
       begin
-       if(LineList.Line[i-1].Count>=4) and (Result.OutputFormat='') then
+       if(LineList.Line[i-1].Count=4) then
         begin
          tempstr1:=LowerCase(LineList.Line[i-1].Item[2]);
          if(length(tempstr1)>=2) then
@@ -1033,7 +1139,31 @@ begin
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Output format must be output_format/outputformat(format) and not define at least twice.');
+         writeln('ERROR:Output format must be output_format/outputformat(format).');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='output_filename')
+     or(LowerCase(LineList.Line[i-1].Item[0])='outputfilename')
+     or(LowerCase(LineList.Line[i-1].Item[0])='output') then
+      begin
+       if(LineList.Line[i-1].Count=4) then
+        begin
+         tempstr1:=LowerCase(LineList.Line[i-1].Item[2]);
+         if(length(tempstr1)>=2) then
+          begin
+           if(tempstr1[1]='"') or (tempstr1[1]=#39) then
+           Result.OutputFormat:=Copy(tempstr1,2,length(tempstr1)-2)
+           else
+           Result.OutputFormat:=tempstr1;
+          end
+         else Result.OutputFormat:=tempstr1;
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:Output FileName must be output_filename/outputfilename/output(filename).');
          readln;
          halt;
         end;
@@ -1219,7 +1349,8 @@ begin
           begin
            tempstr1:=unild_script_translate_string(LineList.Line[i-1].Item[j-1],true);
            if(Result.Section[Result.SectionCount-1].SectionName='')
-           and((tempstr1='.symtab')or(tempstr1='.strtab')or(tempstr1='.shstrtab')or(tempstr1='.dynamic')
+           and((tempstr1='.hash')or(tempstr1='.gnu.hash') or
+           (tempstr1='.symtab')or(tempstr1='.strtab')or(tempstr1='.shstrtab')or(tempstr1='.dynamic')
            or(tempstr1='.dynsym')or(tempstr1='.dynstr')or(tempstr1='.got')or(tempstr1='.got.plt')
            or(Copy(tempstr1,1,5)='.rela')or(Copy(tempstr1,1,4)='.rel') or (Copy(tempstr1,1,5)='.relr')) then
             begin
@@ -1370,8 +1501,208 @@ begin
    inc(i);
   end;
  if(Result.elfclass=unild_class_relocatable) and (Result.NoSymbol) then Result.NoSymbol:=false;
+ if(Result.elfclass=unild_class_relocatable) then Result.Interpreter:='';
+ Result.SectionCountExtra:=0;
+ if(Script.DynamicSectionEnable) then
+  begin
+   inc(Result.SectionCountExtra); Result.DynamicSectionIndex:=Result.SectionCountExtra;
+  end;
+ if(Script.GlobalOffsetTableSectionEnable) then
+  begin
+   inc(Result.SectionCountExtra); Result.GlobalOffsetTableSectionIndex:=Result.SectionCountExtra;
+  end;
  {Free the String List}
  StrList.Free;
+end;
+function unild_generate_default:unild_script;
+var i:SizeUint;
+begin
+ if(ScriptEnable) then Result:=Script;
+ Result.SectionCount:=14; SetLength(Result.Section,14); i:=1;
+ if(Script.EntryName='') then Script.EntryName:='_start';
+ {Set the Section .text,can be read and execute}
+ Result.Section[i-1].SectionName:='.text';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='execute';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.text.*';
+ inc(i);
+ {Set the Section .init,can be read and execute}
+ Result.Section[i-1].SectionName:='.init';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='execute';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.init.*';
+ inc(i);
+ {Set the Section .init_array,can be read and execute}
+ Result.Section[i-1].SectionName:='.init_array';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.init_array.*';
+ inc(i);
+ {Set the Section .fini,can be read and execute}
+ Result.Section[i-1].SectionName:='.fini';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='execute';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.fini.*';
+ inc(i);
+ {Set the Section .fini_array,can be read and execute}
+ Result.Section[i-1].SectionName:='.fini_array';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.fini_array.*';
+ inc(i);
+ {Set the Section .preinit_array,can be read and execute}
+ Result.Section[i-1].SectionName:='.preinit_array';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.preinit_array.*';
+ inc(i);
+ {Set the Section .rodata,can be readonly}
+ Result.Section[i-1].SectionName:='.rodata';
+ Result.Section[i-1].SectionAttributeCount:=1;
+ SetLength(Result.Section[i-1].SectionAttribute,1);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.rodata.*';
+ inc(i);
+ {Set the Section .data,can be read and write}
+ Result.Section[i-1].SectionName:='.data';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.data.*';
+ inc(i);
+ {Set the Section .sdata,can be read and write}
+ Result.Section[i-1].SectionName:='.sdata';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sdata.*';
+ inc(i);
+ {Set the Section .bss,can be read and write}
+ Result.Section[i-1].SectionName:='.bss';
+ Result.Section[i-1].SectionAttributeCount:=3;
+ SetLength(Result.Section[i-1].SectionAttribute,3);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionAttribute[2]:='nobit';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.bss.*';
+ inc(i);
+ {Set the Section .sbss,can be read and write}
+ Result.Section[i-1].SectionName:='.sbss';
+ Result.Section[i-1].SectionAttributeCount:=3;
+ SetLength(Result.Section[i-1].SectionAttribute,3);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionAttribute[2]:='nobit';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sbss.*';
+ inc(i);
+ {Set the Section .tdata,can be read and write}
+ Result.Section[i-1].SectionName:='.tdata';
+ Result.Section[i-1].SectionAttributeCount:=3;
+ SetLength(Result.Section[i-1].SectionAttribute,3);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionAttribute[2]:='tls';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.tdata.*';
+ inc(i);
+ {Set the Section .tbss,can be read and write}
+ Result.Section[i-1].SectionName:='.tdata';
+ Result.Section[i-1].SectionAttributeCount:=3;
+ SetLength(Result.Section[i-1].SectionAttribute,3);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionAttribute[2]:='tls';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.tbss.*';
+ inc(i);
+ {Set the Section .debug,can be read and write}
+ Result.Section[i-1].SectionName:='.debug';
+ Result.Section[i-1].SectionAttributeCount:=0;
+ SetLength(Result.Section[i-1].SectionAttribute,0);
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_frame.*';
+ inc(i);
 end;
 
 end.

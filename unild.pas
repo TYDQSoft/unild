@@ -97,7 +97,7 @@ begin
 end;
 procedure unild_help;
 begin
- writeln('unild(universal linker editor) version 0.0.1');
+ writeln('unild(universal linker editor) version 0.0.2');
  writeln('Commands:unild [parameters] '+
  '(linking commands are not case-sensitive,while file name and path not)');
  writeln('Tips:Implicit section will not be auto-generated in the file,'
@@ -109,9 +109,10 @@ begin
  writeln('  Set the output format type to untyped binary(pure binary).');
  writeln('--version');
  writeln('  Show the version of the unild.');
- writeln('--smartlinking,--smart,--smartlink');
+ writeln('--smartlinking,--smart,--smartlink,-smart-linking,--smart-link');
  writeln('  Enable the smart linking of the unild(disable the linking all option).');
- writeln('--linkallsection,--linkallsect,--nosmartlinking,--linkall,--nosmart,--nosmartlinking');
+ writeln('--linkallsection,--linkallsect,--nosmartlinking,--linkall,--nosmart,--nosmartlinking'+
+ '--no-smartlink,--no-smartlinking,--no-smart-linking');
  writeln('  Disable the smart linking of the unild(enable the linking all option).');
  writeln('--no-symbol,--discard-symbol,--strip-symbol,--delete-symbol');
  writeln('  Erase the static symbol of the output file(disable the keeping symbol option).');
@@ -123,14 +124,15 @@ begin
  writeln('  Disable the Writable Got(Global Offset Table) section(ELF Files Only).');
  writeln('--interpreter,--interp');
  writeln('  Specify the path of the interpreter(ELF dynamic library and ELF executable only).');
- writeln('--output-file-name,--output-filename,--outputfilename');
+ writeln('--output-file-name,--output-filename,--outputfilename,--output');
  writeln('  Specify output file name(Cannot lack,otherwise a error will thrown).');
- writeln('--input-file,--inputfile');
+ writeln('--input-file,--inputfile,--input');
  writeln('  Specify the input file name(Single File).');
- writeln('--input-file-path,--input-filepath,--inputfilepath');
+ writeln('--input-file-path,--input-filepath,--inputfilepath,--input-path,--inputpath');
  writeln('  Specify the path contains input file(without subdirectory).');
  writeln('--input-file-path-with-subdir,--input-filepath-with-subdir,--inputfilepath-with-subdir,'+
- '--input-file-path-withsubdir,--input-filepath-withsubdir,--inputfilepath-withsubdir');
+ '--input-file-path-withsubdir,--input-filepath-withsubdir,--inputfilepath-withsubdir,'+
+ '--input-path-with-subdir,--input-path-withsubdir,--inputpath-withsubdir,--inputpathwithsubdir');
  writeln('  Specify the path contains input file(with subdirectory).');
  writeln('--dynamic-library,--dynamiclibrary,--shared-library,--sharedlibrary');
  writeln('  Specify the dynamic library name needed in output file.');
@@ -194,7 +196,12 @@ begin
  writeln('  Specify the entry name of the output file.');
  writeln('--script-path,--scriptpath,--linker-script-path,--linker-scriptpath,--linkerscriptpath'+
  ',--linker-script,--linkerscript');
- writeln('  Specify the Linker Script Path.');
+ writeln('  Specify the Linker Script Path(Otherwise use the internal linker script).');
+ writeln('--script-path-default,--scriptpath-default,'
+ +'--linker-script-path-default,--linker-scriptpath-default,--linkerscriptpath-default'+
+ ',--linker-script-default,--linkerscript-default');
+ writeln('  Using the default linker script in internal program(if the linker script does not specified,'+
+ 'same as no commnand about linker script).');
  writeln('--gnu-linux,--gnulinux,--gnu,--linux');
  writeln('  Specify the ELF File Operating System to Linux(ELF File Only).');
  writeln('--application,--app');
@@ -211,6 +218,17 @@ begin
  writeln('  Disable the File Symbol of the Output File.');
  writeln('--disablesectionsymbol,--disable-sectionsymbol,--disable-section-symbol');
  writeln('  Disable the Section Symbol of the Output File.');
+ writeln('--interpreter-need-function,--interpreter-needfunction,--interpreterneedfunction'+
+ '--interpret-need-function,--interpret-needfunction,--interpretneedfunction');
+ writeln('  Specify the Demanded Function in the interpreter to call.');
+ writeln('--gotenable,--got-enable');
+ writeln('  Enable the GOT(Global Offset Table) Section as the symbol of the file.');
+ writeln('--gotalias,--got-alias');
+ writeln('  Set the GOT(Global Offset Table) Section Alias as a symbol(Must Enable the GOT Symbol).');
+ writeln('--dynamicenable,--dynamic-enable');
+ writeln('  Enable the Dynamic Section as the symbol of the file(Must in ELF File).');
+ writeln('--dynamicalias,--dynamic-alias');
+ writeln('  Set the Dynamic Section Alias as a symbol(Must Enable the Dynamic Symbol and in ELF File).');
  writeln('--help');
  writeln('  Show the help of the unild.');
 end;
@@ -246,12 +264,13 @@ begin
     end
    else if(LowerCase(ParamStr(i))='--version') then
     begin
-     writeln('unild(universal linker editor) version 0.0.1');
+     writeln('unild(universal linker editor) version 0.0.2');
      readln;
      halt;
     end
    else if(LowerCase(ParamStr(i))='--smartlinking') or (LowerCase(ParamStr(i))='--smart')
-   or(LowerCase(ParamStr(i))='--smartlink') then
+   or(LowerCase(ParamStr(i))='--smartlink') or(LowerCase(ParamStr(i))='--smart-link') or
+   (LowerCase(ParamStr(i))='--smart-linking')then
     begin
      Script.SmartLinking:=true; Script.LinkAll:=false;
     end
@@ -269,7 +288,9 @@ begin
     end
    else if(LowerCase(ParamStr(i))='--linkallsection') or (LowerCase(ParamStr(i))='--linkallsect')
    or(LowerCase(ParamStr(i))='--nosmartlinking') or(LowerCase(ParamStr(i))='--linkall')
-   or(LowerCase(ParamStr(i))='--nosmart') or (LowerCase(ParamStr(i))='--nosmartlink') then
+   or(LowerCase(ParamStr(i))='--nosmart') or (LowerCase(ParamStr(i))='--nosmartlink')
+   or(LowerCase(ParamStr(i))='--no-smartlink') or (LowerCase(ParamStr(i))='--no-smartlinking')
+   or(LowerCase(ParamStr(i))='--no-smart-linking') then
     begin
      Script.SmartLinking:=false; Script.LinkAll:=true;
     end
@@ -321,12 +342,13 @@ begin
     end
    else if(LowerCase(ParamStr(i))='--output-file-name')
    or(LowerCase(ParamStr(i))='--output-filename')
-   or(LowerCase(ParamStr(i))='--outputfilename') then
+   or(LowerCase(ParamStr(i))='--outputfilename') or (LowerCase(ParamStr(i))='--output') then
     begin
      OutputFileName:=ParamStr(i+1);
      inc(i);
     end
-   else if(LowerCase(ParamStr(i))='--input-file') or (LowerCase(ParamStr(i))='--inputfile') then
+   else if(LowerCase(ParamStr(i))='--input-file') or (LowerCase(ParamStr(i))='--inputfile')
+   or (LowerCase(ParamStr(i))='--input') then
     begin
      j:=i+1;
      while(j<=ParamCount) do
@@ -345,7 +367,8 @@ begin
      i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--input-file-path') or (LowerCase(ParamStr(i))='--input-filepath')
-   or(LowerCase(ParamStr(i))='--inputfilepath') then
+   or(LowerCase(ParamStr(i))='--inputfilepath')
+   or(LowerCase(ParamStr(i))='--input-path') or(LowerCase(ParamStr(i))='--inputpath')then
     begin
      j:=i+1;
      while(j<=ParamCount) do
@@ -370,7 +393,11 @@ begin
    or(LowerCase(ParamStr(i))='--inputfilepath-with-subdir')
    or(LowerCase(ParamStr(i))='--input-file-path-withsubdir')
    or(LowerCase(ParamStr(i))='--input-filepath-withsubdir')
-   or(LowerCase(ParamStr(i))='--inputfilepath-withsubdir') then
+   or(LowerCase(ParamStr(i))='--inputfilepath-withsubdir')
+   or(LowerCase(ParamStr(i))='--input-path-with-subdir')
+   or(LowerCase(ParamStr(i))='--input-path-withsubdir')
+   or(LowerCase(ParamStr(i))='--inputpath-withsubdir')
+   or(LowerCase(ParamStr(i))='--inputpathwithsubdir') then
     begin
      j:=i+1;
      while(j<=ParamCount) do
@@ -715,6 +742,41 @@ begin
     begin
      LinkerScript:=ParamStr(i+1); inc(i);
     end
+   else if(LowerCase(ParamStr(i))='--script-path-default') or
+   (LowerCase(ParamStr(i))='--scriptpath-default') or
+   (LowerCase(ParamStr(i))='--linker-script-path-default') or
+   (LowerCase(ParamStr(i))='--linker-scriptpath-default') or
+   (LowerCase(ParamStr(i))='--linkerscriptpath-default') or
+   (LowerCase(ParamStr(i))='--linker-script-default') or
+   (LowerCase(ParamStr(i))='--linkerscript-default') then
+    begin
+     LinkerScript:='';
+    end
+   else if(LowerCase(ParamStr(i))='--interpreter-need-function') or
+   (LowerCase(ParamStr(i))='--interpreter-needfunction') or
+   (LowerCase(ParamStr(i))='--interpreterneedfunction') or
+   (LowerCase(ParamStr(i))='--interp-need-function') or
+   (LowerCase(ParamStr(i))='--interp-needfunction') or
+   (LowerCase(ParamStr(i))='--interpneedfunction') then
+    begin
+     Script.InterpreterDynamicLinkFunction:=ParamStr(i+1); inc(i);
+    end
+   else if(LowerCase(ParamStr(i))='--got-enable') or (LowerCase(ParamStr(i))='--gotenable') then
+    begin
+     Script.GlobalOffsetTableSectionEnable:=true;
+    end
+   else if(LowerCase(ParamStr(i))='--got-alias') or (LowerCase(ParamStr(i))='--gotalias') then
+    begin
+     Script.GlobalOffsetTableAlias:=ParamStr(i+1); inc(i);
+    end
+   else if(LowerCase(ParamStr(i))='--dynamic-enable') or (LowerCase(ParamStr(i))='--dynamicenable') then
+    begin
+     Script.DynamicSectionEnable:=true;
+    end
+   else if(LowerCase(ParamStr(i))='--dynamic-alias') or (LowerCase(ParamStr(i))='--dynamicalias') then
+    begin
+     Script.DynamicSectionAlias:=ParamStr(i+1); inc(i);
+    end
    else if(LowerCase(ParamStr(i))='--help') then
     begin
      unild_help;
@@ -724,6 +786,8 @@ begin
    else
     begin
      writeln('ERROR:Unknown Command '+ParamStr(i+1));
+     writeln('Now show the help manual:');
+     unild_help;
      writeln('Please input --help for help.');
      readln;
      halt;
@@ -747,19 +811,34 @@ begin
    halt;
   end;
  if(InputBits<>0) then Script.Bits:=InputBits else InputBits:=Script.Bits;
- if(LinkerScript='') then
-  begin
-   writeln('ERROR:Linker Script Path '+Script.InputFormat+' does not exist.');
-   readln;
-   halt;
-  end;
- Script:=unild_script_read(LinkerScript);
+ if(LinkerScript<>'') then Script:=unild_script_read(LinkerScript)
+ else Script:=unild_generate_default;
  if(InputArchitecture<>OutputArchitecture) or (InputBits>OutputBits) then
   begin
    writeln('ERROR:Input Architecture '+Script.InputFormat+' and Output Architecture '+
    Script.OutputFormat+' does not correspond.');
    readln;
    halt;
+  end;
+ if(Script.IsEFIFile) and (Script.EFIFileIndex=0) then
+  begin
+   writeln('ERROR:EFI File Format Type does not specified.');
+   readln;
+   halt;
+  end;
+ if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) and (Script.elfclass=0) then
+  begin
+   writeln('ERROR:ELF File Format Type does not specified.');
+   readln;
+   halt;
+  end;
+ if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) and (Script.Interpreter<>'') then
+  begin
+   Script.Interpreter:=''; Script.NoExternalLibrary:=false;
+  end;
+ if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
+  begin
+   Script.Interpreter:='';
   end;
  if(Script.IsUntypedBinary) then
   begin
@@ -794,7 +873,9 @@ begin
    SetLength(Script.DynamicPathWithSubDirectoryList,0);
    Script.DynamicPathWithSubDirectoryCount:=0;
   end;
- if(Script.NoExternalLibrary=false) then
+ if(Script.NoExternalLibrary=false) and (Script.NoFixedAddress=true)
+ and(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false)
+ and(Script.elfclass<>unild_class_relocatable) then
   begin
    if(Script.Interpreter='') then
     begin

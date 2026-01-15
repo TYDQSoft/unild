@@ -42,6 +42,19 @@ type unifile_elf_object_file_symbol_table=packed record
                                    Objects:array of unifile_elf_object_file;
                                    ObjectCount:SizeUint;
                                    end;
+     unifile_elf_interpreter_hash_table=packed record
+                                        BucketCount:Dword;
+                                        BucketItem:array of Dword;
+                                        BucketHash:array of Dword;
+                                        ChainCount:Dword;
+                                        ChainItem:array of Dword;
+                                        ChainHash:array of Dword;
+                                        end;
+     unifile_elf_interpreter=packed record
+                             InterpreterSymbolHash:array of Dword;
+                             InterpreterHashTable:unifile_elf_interpreter_hash_table;
+                             DynamicLibraryResolveOffset:SizeUint;
+                             end;
      unifile_elf_object_file_parsed_relocation=packed record
                                                RelocationSection:string;
                                                RelocationSectionHash:SizeUint;
@@ -434,6 +447,334 @@ function unifile_align(base,align:SizeUint):SizeUint;
 begin
  Result:=(base+align-1) div align*align;
 end;
+function unifile_elf_hash(str:string):dword;
+var i,hash,x:Dword;
+begin
+ hash:=0; x:=0; i:=1;
+ while(i<=length(str))do
+  begin
+   hash:=hash shl 4+Byte(str[i]);
+   x:=hash and $F0000000;
+   if(x<>0) then
+    begin
+     hash:=hash xor (x shr 24);
+     hash:=hash and (not x);
+    end;
+   inc(i);
+  end;
+ Result:=hash and $7FFFFFFF;
+end;
+function unifile_search_for_interpreter_hash_table(HashTable:unifile_elf_interpreter_hash_table;
+GoalHash:Dword):Dword;
+var Index:Dword;
+begin
+ Index:=GoalHash mod HashTable.BucketCount; Result:=0;
+ if(HashTable.BucketHash[Index]=GoalHash) then exit(Index);
+ if(Index<>0) then
+  begin
+   Index:=HashTable.BucketItem[Index];
+   while(HashTable.ChainItem[Index]<>0)do
+    begin
+     if(HashTable.ChainHash[Index]=GoalHash) then exit(Index);
+     Index:=HashTable.ChainItem[Index];
+    end;
+  end;
+end;
+function unifile_check_interpreter(InterpreterPath:string;CheckArchitecture:word;CheckBits:byte;
+basescript:unild_script):unifile_elf_interpreter;
+var fs:TFileStream;
+    InterpreterContent:Pointer;
+    i,j,FunctionIndex:SizeUint;
+    {For Finding the Needed Function}
+    SearchOffset:Dword;
+    SearchCount:Dword;
+    SearchFunctionHash:Dword;
+    DynamicPointer:Pointer;
+    DynamicCount:Dword;
+    HashPointer:Pointer;
+    DynamicSymbolPointer:Pointer;
+    DynamicSymbolCount:Dword;
+    DynamicStringPointer:Pointer;
+    {For Temporary Variable during searching}
+    tempnum1,tempnum2,tempnum3:SizeUint;
+begin
+ {Read the elf interpreter file in disk}
+ fs:=TFileStream.Create(InterpreterPath,fmOpenRead);
+ InterpreterContent:=allocmem(fs.Size);
+ fs.Read(InterpreterContent^,fs.Size);
+ fs.Free;
+ {Hash the Search Function}
+ SearchFunctionHash:=unifile_elf_hash(basescript.InterpreterDynamicLinkFunction);
+ {Then Check the elf file}
+ if(elf_check_signature(Pelf32_header(InterpreterContent)^.elf_id)=false) then
+  begin
+   FreeMem(InterpreterContent);
+   writeln('ERROR:Interpreter is not the ELF Format File.');
+   readln;
+   halt;
+  end;
+ if(CheckBits=32) and
+ (Pelf32_header(InterpreterContent)^.elf_id[elf_class_position]<>elf_class_32) then
+  begin
+   FreeMem(InterpreterContent);
+   writeln('ERROR:Interpreter is not the ELF File correspond to the 32-bit file.');
+   readln;
+   halt;
+  end
+ else if(CheckBits=64) and
+ (Pelf32_header(InterpreterContent)^.elf_id[elf_class_position]<>elf_class_64) then
+  begin
+   FreeMem(InterpreterContent);
+   writeln('ERROR:Interpreter is not the ELF File correspond to the 64-bit file.');
+   readln;
+   halt;
+  end;
+ if(CheckBits=32) then
+  begin
+   if(Pelf32_header(InterpreterContent)^.elf_machine<>CheckArchitecture) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Interpreter Architecture is not equal the Executable Architecture.');
+     readln;
+     halt;
+    end;
+   {Search for Dynamic Section}
+   SearchOffset:=Pelf32_header(InterpreterContent)^.elf_program_header_offset;
+   SearchCount:=Pelf32_header(InterpreterContent)^.elf_program_header_number;
+   i:=1; DynamicPointer:=nil;
+   while(i<=SearchCount)do
+    begin
+     if(Pelf32_program_header(InterpreterContent+SearchOffset+
+     (i-1)*sizeof(elf32_program_header))^.program_type=elf_program_header_type_dynamic) then
+      begin
+       DynamicPointer:=InterpreterContent+
+       Pelf32_program_header(InterpreterContent+SearchOffset+
+       (i-1)*sizeof(elf32_program_header))^.program_offset;
+       DynamicCount:=Pelf32_program_header(InterpreterContent+SearchOffset+
+       (i-1)*sizeof(elf32_program_header))^.program_file_size div sizeof(elf32_program_header);
+       break;
+      end;
+     inc(i);
+    end;
+   if(i>SearchCount) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Cannot find the dynamic symbol '+basescript.InterpreterDynamicLinkFunction
+     +' in interpreter '+InterpreterPath);
+     readln;
+     halt;
+    end;
+   i:=1;
+   HashPointer:=nil; DynamicSymbolPointer:=nil; DynamicSymbolCount:=0; DynamicStringPointer:=nil;
+   while(i<=DynamicCount)do
+    begin
+     if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_hash) then
+      begin
+       HashPointer:=InterpreterContent+
+       Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_symbol_table) then
+      begin
+       DynamicSymbolPointer:=InterpreterContent+
+       Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_String_table) then
+      begin
+       DynamicStringPointer:=InterpreterContent+
+       Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_pointer;
+      end;
+     inc(i);
+    end;
+   if(HashPointer=nil) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Hash Section does not exist,cannot determine the count of the symbol table.');
+     readln;
+     halt;
+    end;
+   if(DynamicStringPointer=nil) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Dynamic String Table Section does not exist,cannot know the symbol name.');
+     readln;
+     halt;
+    end;
+   if(DynamicSymbolPointer=nil) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Dynamic Symbol Table does not exist,cannot acquire the symbol attributes.');
+     readln;
+     halt;
+    end;
+   {Translate the hash data to data structure of the linker}
+   tempnum1:=Pdword(HashPointer)^;
+   Result.InterpreterHashTable.BucketCount:=tempnum1;
+   SetLength(Result.InterpreterHashTable.BucketItem,tempnum1);
+   SetLength(Result.InterpreterHashTable.BucketHash,tempnum1);
+   tempnum2:=Pdword(HashPointer+4+tempnum1*4)^;
+   Result.InterpreterHashTable.ChainCount:=tempnum2;
+   SetLength(Result.InterpreterHashTable.ChainItem,tempnum2);
+   SetLength(Result.InterpreterHashTable.ChainHash,tempnum2);
+   SetLength(Result.InterpreterSymbolHash,tempnum2);
+   for i:=2 to tempnum1 do
+    begin
+     Result.InterpreterSymbolHash[i-1]:=
+     unifile_elf_hash(PChar(DynamicStringPointer+
+     Pelf32_symbol_table_entry(DynamicSymbolPointer+(i-1)*sizeof(elf32_symbol_table_entry))^.symbol_name));
+    end;
+   for i:=1 to Result.InterpreterHashTable.BucketCount do
+    begin
+     Result.InterpreterHashTable.BucketItem[i-1]:=Pdword(HashPointer+i*4)^;
+     Result.InterpreterHashTable.BucketHash[i-1]:=
+     Result.InterpreterSymbolHash[Pdword(HashPointer+i*4)^];
+    end;
+   for i:=1 to Result.InterpreterHashTable.ChainCount do
+    begin
+     Result.InterpreterHashTable.ChainItem[i-1]:=Pdword(HashPointer+4+tempnum1*4+i*4)^;
+     Result.InterpreterHashTable.ChainHash[i-1]:=
+     Result.InterpreterSymbolHash[Pdword(HashPointer+4+tempnum1*4+i*4)^];
+    end;
+   FunctionIndex:=unifile_search_for_interpreter_hash_table(
+   Result.InterpreterHashTable,SearchFunctionHash);
+   if(FunctionIndex=0) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction
+     + 'not found in interpreter.');
+     readln;
+     halt;
+    end;
+   Result.DynamicLibraryResolveOffset:=
+   Pelf32_symbol_table_entry(DynamicSymbolPointer+(
+   FunctionIndex-1)*sizeof(elf32_symbol_table_entry))^.symbol_value;
+  end
+ else if(CheckBits=64) then
+  begin
+   if(Pelf64_header(InterpreterContent)^.elf_machine<>CheckArchitecture) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Interpreter Architecture is not equal the Executable Architecture.');
+     readln;
+     halt;
+    end;
+   {Search for Dynamic Section}
+   SearchOffset:=Pelf64_header(InterpreterContent)^.elf_program_header_offset;
+   SearchCount:=Pelf64_header(InterpreterContent)^.elf_program_header_number;
+   i:=1; DynamicPointer:=nil;
+   while(i<=SearchCount)do
+    begin
+     if(Pelf64_program_header(InterpreterContent+SearchOffset+
+     (i-1)*sizeof(elf64_program_header))^.program_type=elf_program_header_type_dynamic) then
+      begin
+       DynamicPointer:=InterpreterContent+
+       Pelf64_program_header(InterpreterContent+SearchOffset+
+       (i-1)*sizeof(elf64_program_header))^.program_offset;
+       DynamicCount:=Pelf64_program_header(InterpreterContent+SearchOffset+
+       (i-1)*sizeof(elf64_program_header))^.program_file_size div sizeof(elf64_program_header);
+       break;
+      end;
+     inc(i);
+    end;
+   if(i>SearchCount) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Cannot find the dynamic symbol '+basescript.InterpreterDynamicLinkFunction
+     +' in interpreter '+InterpreterPath);
+     readln;
+     halt;
+    end;
+   i:=1;
+   HashPointer:=nil; DynamicSymbolPointer:=nil; DynamicSymbolCount:=0; DynamicStringPointer:=nil;
+   while(i<=DynamicCount)do
+    begin
+     if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_hash) then
+      begin
+       HashPointer:=InterpreterContent+
+       Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_symbol_table) then
+      begin
+       DynamicSymbolPointer:=InterpreterContent+
+       Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_String_table) then
+      begin
+       DynamicStringPointer:=InterpreterContent+
+       Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_pointer;
+      end;
+     inc(i);
+    end;
+   if(HashPointer=nil) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Hash Section does not exist,cannot determine the count of the symbol table.');
+     readln;
+     halt;
+    end;
+   if(DynamicStringPointer=nil) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Dynamic String Table Section does not exist,cannot know the symbol name.');
+     readln;
+     halt;
+    end;
+   if(DynamicSymbolPointer=nil) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Dynamic Symbol Table does not exist,cannot acquire the symbol attributes.');
+     readln;
+     halt;
+    end;
+   {Translate the hash data to data structure of the linker}
+   tempnum1:=Pdword(HashPointer)^;
+   Result.InterpreterHashTable.BucketCount:=tempnum1;
+   SetLength(Result.InterpreterHashTable.BucketItem,tempnum1);
+   SetLength(Result.InterpreterHashTable.BucketHash,tempnum1);
+   tempnum2:=Pdword(HashPointer+4+tempnum1*4)^;
+   Result.InterpreterHashTable.ChainCount:=tempnum2;
+   SetLength(Result.InterpreterHashTable.ChainItem,tempnum2);
+   SetLength(Result.InterpreterHashTable.ChainHash,tempnum2);
+   SetLength(Result.InterpreterSymbolHash,tempnum2);
+   for i:=2 to tempnum1 do
+    begin
+     Result.InterpreterSymbolHash[i-1]:=
+     unifile_elf_hash(PChar(DynamicStringPointer+
+     Pelf64_symbol_table_entry(DynamicSymbolPointer+(i-1)*sizeof(elf64_symbol_table_entry))^.symbol_name));
+    end;
+   for i:=1 to Result.InterpreterHashTable.BucketCount do
+    begin
+     Result.InterpreterHashTable.BucketItem[i-1]:=Pdword(HashPointer+i*4)^;
+     Result.InterpreterHashTable.BucketHash[i-1]:=
+     Result.InterpreterSymbolHash[Pdword(HashPointer+i*4)^];
+    end;
+   for i:=1 to Result.InterpreterHashTable.ChainCount do
+    begin
+     Result.InterpreterHashTable.ChainItem[i-1]:=Pdword(HashPointer+4+tempnum1*4+i*4)^;
+     Result.InterpreterHashTable.ChainHash[i-1]:=
+     Result.InterpreterSymbolHash[Pdword(HashPointer+4+tempnum1*4+i*4)^];
+    end;
+   FunctionIndex:=unifile_search_for_interpreter_hash_table(
+   Result.InterpreterHashTable,SearchFunctionHash);
+   if(FunctionIndex=0) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction
+     + 'not found in interpreter.');
+     readln;
+     halt;
+    end;
+   Result.DynamicLibraryResolveOffset:=
+   Pelf64_symbol_table_entry(DynamicSymbolPointer+(
+   FunctionIndex-1)*sizeof(elf64_symbol_table_entry))^.symbol_value;
+  end;
+ FreeMem(InterpreterContent);
+end;
 function unifile_read_elf_file(fn:string):unifile_elf_object_file;
 var fs:TFileStream;
     OriginalContent:Pointer;
@@ -464,6 +805,7 @@ begin
  {Then Check the elf file}
  if(elf_check_signature(Pelf32_header(OriginalContent)^.elf_id)=false) then
   begin
+   FreeMem(OriginalContent);
    writeln('ERROR:File '+fn+' is not a vaild elf file.');
    readln;
    halt;
@@ -474,6 +816,7 @@ begin
  Result.Bits:=unifile_bit_64
  else
   begin
+   FreeMem(OriginalContent);
    writeln('ERROR:File '+fn+' elf file class is invaild.');
    readln;
    halt;
@@ -866,6 +1209,7 @@ begin
  {Then Parse the Archive File}
  if(elf_check_archive_signature(OriginalContent)=false) then
   begin
+   FreeMem(OriginalContent);
    writeln('ERROR:File '+fn+ 'is not an elf archive file.');
    readln;
    halt;
@@ -1426,6 +1770,7 @@ var i,j,k,m,n,a,b,c,d,e,f,g,h:SizeInt;
     {For Checking the Vaild Symbols}
     VaildList:unifile_index_list;
     VaildLen,VaildLenInVaild,VaildLenVaild:SizeUInt;
+Label JumpToAutoSection;
 begin
  {Initialize the First Stage}
  Result.Architecture:=basefile.Architecture;
@@ -1605,8 +1950,12 @@ begin
      or(LowerCase(basescript.Section[i-1].SectionAttribute[j-1])='infomation') then
      AttributeData:=AttributeData or unifile_attribute_infomation
      else if(LowerCase(basescript.Section[i-1].SectionAttribute[j-1])='nobits')
+     or(LowerCase(basescript.Section[i-1].SectionAttribute[j-1])='nobit')
      or(LowerCase(basescript.Section[i-1].SectionAttribute[j-1])='notinfile')then
-     AttributeData:=AttributeData or unifile_attribute_not_in_file;
+     AttributeData:=AttributeData or unifile_attribute_not_in_file
+     else if(LowerCase(basescript.Section[i-1].SectionAttribute[j-1])='tls')
+     or(LowerCase(basescript.Section[i-1].SectionAttribute[j-1])='threadlocalstorage')then
+     AttributeData:=AttributeData or unifile_attribute_thread_local_storage;
      inc(j);
     end;
    Result.SectionAddress[i-1]:=basescript.Section[i-1].SectionAddress;
@@ -1617,7 +1966,8 @@ begin
      if(Result.Bits=32) then Result.SectionAlign[i-1]:=4 else Result.SectionAlign[i-1]:=8;
     end;
    if(basescript.Section[i-1].SectionAttributeCount=0) and
-   ((basescript.Section[i-1].SectionName='.bss') or (basescript.Section[i-1].SectionName='.tbss')) then
+   ((basescript.Section[i-1].SectionName='.bss') or (basescript.Section[i-1].SectionName='.tbss')
+   or((basescript.Section[i-1].SectionName='.sbss'))) then
    AttributeData:=AttributeData or unifile_attribute_not_in_file;
    Result.SectionName[i-1]:=basescript.Section[i-1].SectionName;
    Result.SectionSize[i-1]:=0;
@@ -1759,16 +2109,56 @@ begin
  {Then Generate the Symbol Table}
  i:=1; k:=0;
  Result.SymbolTable.SymbolCount:=0;
- SetLength(Result.SymbolTable.SymbolName,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolNameHash,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolSectionName,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolSectionNameHash,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolBinding,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolSize,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolValue,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolType,basefile.SectionSymbolTable.SymbolCount);
- SetLength(Result.SymbolTable.SymbolVisibility,basefile.SectionSymbolTable.SymbolCount);
+ SetLength(Result.SymbolTable.SymbolName,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolNameHash,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolSectionName,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolSectionNameHash,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolBinding,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolSize,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolValue,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolType,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
+ SetLength(Result.SymbolTable.SymbolVisibility,
+ basefile.SectionSymbolTable.SymbolCount+basescript.SectionCountExtra);
  Result.DynamicSymbolCount:=0; Result.SymbolCount:=0;
+ if(basescript.SectionCountExtra>0) then
+  begin
+   if(basescript.GlobalOffsetTableSectionEnable) then
+    begin
+     inc(k);
+     Result.SymbolTable.SymbolName[k-1]:=basescript.GlobalOffsetTableAlias;
+     Result.SymbolTable.SymbolNameHash[k-1]:=
+     unihash_generate_value(basescript.GlobalOffsetTableAlias,false);
+     Result.SymbolTable.SymbolSectionName[k-1]:='.got';
+     Result.SymbolTable.SymbolSectionNameHash[k-1]:=unihash_generate_value('.got',true);
+     Result.SymbolTable.SymbolBinding[k-1]:=elf_symbol_bind_local;
+     Result.SymbolTable.SymbolSize[k-1]:=0;
+     Result.SymbolTable.SymbolValue[k-1]:=0;
+     Result.SymbolTable.SymbolType[k-1]:=elf_symbol_type_object;
+     Result.SymbolTable.SymbolVisibility[k-1]:=elf_symbol_visibility_default;
+    end;
+   if(basescript.DynamicSectionEnable) then
+    begin
+     inc(k);
+     Result.SymbolTable.SymbolName[k-1]:=basescript.DynamicSectionAlias;
+     Result.SymbolTable.SymbolNameHash[k-1]:=
+     unihash_generate_value(basescript.GlobalOffsetTableAlias,false);
+     Result.SymbolTable.SymbolSectionName[k-1]:='.dynamic';
+     Result.SymbolTable.SymbolSectionNameHash[k-1]:=unihash_generate_value('.dynamic',true);
+     Result.SymbolTable.SymbolBinding[k-1]:=elf_symbol_bind_local;
+     Result.SymbolTable.SymbolSize[k-1]:=0;
+     Result.SymbolTable.SymbolValue[k-1]:=0;
+     Result.SymbolTable.SymbolType[k-1]:=elf_symbol_type_object;
+     Result.SymbolTable.SymbolVisibility[k-1]:=elf_symbol_visibility_default;
+    end;
+  end;
  while(i<=basefile.SectionSymbolTable.SymbolCount)do
   begin
    if(basefile.SectionSymbolTable.SymbolType[i-1]=0)
@@ -1916,6 +2306,14 @@ begin
       begin
        inc(a); continue;
       end;
+     if(basescript.SectionCountExtra>0) and
+     (((basescript.DynamicSectionEnable) and
+      (c=basescript.DynamicSectionIndex)) or
+     ((basescript.GlobalOffsetTableSectionEnable) and
+      (c=basescript.GlobalOffsetTableSectionIndex))) then
+      begin
+       goto JumpToAutoSection;
+      end;
      h:=unifile_search_for_hash_table_count(Result.SymbolTableAssist,
      basefile.SectionRelocation[i-1].RelocationSymbolHash[a-1]);
      if(h>1) then
@@ -1938,8 +2336,17 @@ begin
        inc(d);
       end;
      if(d>e) then d:=0;
+     JumpToAutoSection:
+     if(basescript.SectionCountExtra>0) then
+      begin
+       if(basescript.DynamicSectionEnable) and (c=basescript.DynamicSectionIndex) then
+       d:=e+basescript.DynamicSectionIndex
+       else if(basescript.GlobalOffsetTableSectionEnable)
+       and (c=basescript.GlobalOffsetTableSectionIndex) then
+       d:=e+basescript.GlobalOffsetTableSectionIndex;
+      end;
      Result.AdjustTable.GoalSectionIndex[n-1]:=d;
-     if(d<>0) then
+     if(d<>0) and (d<=e) then
      Result.AdjustTable.GoalOffset[n-1]:=
      Result.SectionContent[d-1].ContentOffset[f-1]+Result.SymbolTable.SymbolValue[c-1]
      else Result.AdjustTable.GoalOffset[n-1]:=0;
@@ -3126,23 +3533,6 @@ begin
   end;
  end;
 end;
-function unifile_elf_hash(str:string):dword;
-var i,hash,x:Dword;
-begin
- hash:=0; x:=0; i:=1;
- while(i<=length(str))do
-  begin
-   hash:=hash shl 4+Byte(str[i]);
-   x:=hash and $F0000000;
-   if(x<>0) then
-    begin
-     hash:=hash xor (x shr 24);
-     hash:=hash and (not x);
-    end;
-   inc(i);
-  end;
- Result:=hash and $7FFFFFFF;
-end;
 function unifile_calculate_timestamp:Dword;
 begin
  unifile_calculate_timestamp:=DateTimeToFileDate(Now);
@@ -4119,10 +4509,18 @@ var finalfile:unifile_file_final;
     AllSectionOffset:array of SizeUint;
     {For Additional Symbols}
     SectionStart,SectionCount:SizeUint;
+    {For Interpreter Information}
+    InterpreterInfo:unifile_elf_interpreter;
+    {For Got Alias Symbol Index and Dynamic Alias Symbol Index}
+    GOTSymbolIndex,DynamicSymbolIndex:SizeUint;
 label SkipGot;
 begin
  DynamicBool:=false; GotBool:=false; GotPltOffset:=0;
- SectionStart:=0; SectionCount:=0;
+ SectionStart:=0; SectionCount:=0; GotSymbolIndex:=0; DynamicSymbolIndex:=0;
+ {Check the interpreter vaild}
+ if(basescript.Interpreter<>'') then
+ InterpreterInfo:=unifile_check_interpreter(basescript.Interpreter,basefile.Bits,basefile.Architecture,
+ basescript);
  {Initialize the Final File}
  finalfile.SectionCount:=0; finalfile.FileFlag:=basefile.FileFlag;
  finalfile.Architecture:=basefile.Architecture; finalfile.Bits:=basefile.Bits;
@@ -4266,7 +4664,7 @@ begin
   end;
  {Then generate the Empty Section}
  i:=1; j:=1; k:=1; a:=1; finalfile.SectionCount:=0;
- SetLength(SectionIndex,basefile.SectionCount);
+ SetLength(SectionIndex,basefile.SectionCount+basescript.SectionCountExtra);
  while(i<=basefile.SectionCount)do
   begin
    if(i=1) and (fileclass=unifile_class_elf_file) and (basescript.Interpreter<>'') then
@@ -4393,6 +4791,8 @@ begin
        if(finalfile.GotTableList.GotCount>0) then
         begin
          finalfile.DynamicIndex:=j;
+         if(basescript.DynamicSectionEnable) then
+         SectionIndex[basefile.SectionCount+basescript.DynamicSectionIndex-1]:=j;
          finalfile.DynamicStringTableIndex:=j+1;
          finalfile.DynamicSymbolIndex:=j+2;
          finalfile.RelocationDynamicTableIndex:=j+3;
@@ -4432,6 +4832,8 @@ begin
        else
         begin
          finalfile.DynamicIndex:=j;
+         if(basescript.DynamicSectionEnable) then
+         SectionIndex[basefile.SectionCount+basescript.DynamicSectionIndex-1]:=j;
          finalfile.DynamicStringTableIndex:=j+1;
          finalfile.DynamicSymbolIndex:=j+2;
          finalfile.RelocationDynamicTableIndex:=0;
@@ -4478,7 +4880,7 @@ begin
        SetLength(finalfile.SectionAddress,j+1);
        finalfile.SectionAddress[j-1]:=0;
        SetLength(finalfile.SectionSize,j+1);
-       if(finalfile.DynamicSymbolTable.SymbolCount>0) then
+       if(finalfile.DynamicSymbolTable.SymbolCount>0) or (basescript.Interpreter<>'') then
         begin
          if(finalfile.Bits=32) then
          finalfile.SectionSize[j-1]:=(finalfile.GotTableList.GotCount+3)*4
@@ -4496,6 +4898,8 @@ begin
        finalfile.SectionContent[j-1]:=allocmem(finalfile.SectionSize[j-1]);
        finalfile.SectionCount:=j;
        finalfile.GotIndex:=j;
+       if(basescript.GlobalOffsetTableSectionEnable) then
+       SectionIndex[basefile.SectionCount+basescript.DynamicSectionIndex-1]:=j;
        inc(j);
       end;
     end;
@@ -4633,7 +5037,8 @@ begin
     end;
    inc(i);
   end;
- if(finalfile.DynamicSymbolTable.SymbolCount>0) then GotPltOffset:=3;
+ if(finalfile.DynamicSymbolTable.SymbolCount>0) or (basescript.Interpreter<>'')
+ then GotPltOffset:=3;
  SetLength(finalfile.SectionOffset,finalfile.SectionCount);
  if(fileclass=unifile_class_elf_file) then
   begin
@@ -4652,21 +5057,21 @@ begin
    inc(finalfile.SymbolTable.SymbolCount,basefile.SectionCount);
   end;
  SetLength(finalfile.SymbolTable.SymbolSectionIndex,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  SetLength(finalfile.SymbolTable.SymbolName,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  SetLength(finalfile.SymbolTable.SymbolNameHash,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  SetLength(finalfile.SymbolTable.SymbolBinding,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  SetLength(finalfile.SymbolTable.SymbolSize,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  SetLength(finalfile.SymbolTable.SymbolType,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  SetLength(finalfile.SymbolTable.SymbolValue,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  SetLength(finalfile.SymbolTable.SymbolVisibility,
- finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount);
+ finalfile.SymbolTable.SymbolCount+basefile.AdjustVaildCount+basescript.SectionCountExtra);
  {Then Stab the File and Section to the file}
  if(basefile.FileNameCount>0) and (basescript.EnableFileInformation) then
   begin
@@ -4705,6 +5110,20 @@ begin
     end;
   end;
  i:=1;
+ if(basescript.SectionCountExtra>0) then
+  begin
+   if(basescript.GlobalOffsetTableSectionEnable) and (finalfile.GotIndex>0) then
+    begin
+     GotSymbolIndex:=j+basescript.GlobalOffsetTableSectionIndex;
+    end
+   else if(basescript.GlobalOffsetTableSectionEnable) then inc(i);
+   if(basescript.DynamicSectionEnable) and (finalfile.DynamicIndex>0) and
+   (not ((basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file))) then
+    begin
+     DynamicSymbolIndex:=j+basescript.DynamicSectionIndex;
+    end
+   else if(basescript.DynamicSectionEnable) then inc(i);
+  end;
  while(i<=basefile.SymbolTable.SymbolCount)do
   begin
    if(basefile.SymbolTable.SymbolType[i-1]=0) then
@@ -5291,16 +5710,16 @@ begin
       begin
        if(finalfile.SectionAttribute[i-1]=0) then
         begin
-         if(finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]) then
+         if(i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]) then
          inc(ProgramHeaderCount);
          continue;
         end;
-       if(finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]) and
-       (i<ProgramHeaderCount) and (finalfile.SectionAttribute[i-2]=0) then continue;
+       if(i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])
+       and (finalfile.SectionAttribute[i-2]=0) then continue;
        if(finalfile.SectionName[i-1]='.dynamic') then inc(ProgramHeaderCount);
        if(finalfile.SectionName[i-1]='.interp') then inc(ProgramHeaderCount);
-       if((i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]))
-       or (i=finalfile.SectionCount) then inc(ProgramHeaderCount);
+       if((i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])) or
+       (i=finalfile.SectionCount) then inc(ProgramHeaderCount);
       end;
      finalfile.FileStartAddress:=StartOffset+ProgramHeaderCount*sizeof(elf32_program_header);
     end
@@ -5315,12 +5734,12 @@ begin
          inc(ProgramHeaderCount);
          continue;
         end;
-       if(finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]) and
-       (i<ProgramHeaderCount) and (finalfile.SectionAttribute[i-2]=0) then continue;
+       if(i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])
+       and (finalfile.SectionAttribute[i-2]=0) then continue;
        if(finalfile.SectionName[i-1]='.dynamic') then inc(ProgramHeaderCount);
        if(finalfile.SectionName[i-1]='.interp') then inc(ProgramHeaderCount);
-       if((i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]))
-       or (i=finalfile.SectionCount) then inc(ProgramHeaderCount);
+       if((i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])) or
+       (i=finalfile.SectionCount) then inc(ProgramHeaderCount);
       end;
      finalfile.FileStartAddress:=StartOffset+ProgramHeaderCount*sizeof(elf64_program_header);
     end;
@@ -5429,13 +5848,28 @@ begin
     end;
   end;
  {Get the Section Address and Size of the Section Symbol}
- if(basescript.EnableSectionInformation) then
+ if(not ((basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file)))
+ and(basescript.EnableSectionInformation) then
   begin
    for i:=SectionStart to SectionStart+SectionCount-1 do
     begin
      finalfile.SymbolTable.SymbolValue[i-1]:=finalfile.SectionAddress[i-SectionStart];
      finalfile.SymbolTable.SymbolSize[i-1]:=finalfile.SectionSize[i-SectionStart];
     end;
+  end;
+ if(not ((basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file))) and
+ (basescript.GlobalOffsetTableSectionEnable) and (finalfile.GotIndex>0) then
+  begin
+   finalfile.SymbolTable.SymbolValue[GotSymbolIndex-1]:=finalfile.SectionAddress[finalfile.GotIndex-1];
+   finalfile.SymbolTable.SymbolSize[GotSymbolIndex-1]:=finalfile.SectionSize[finalfile.GotIndex-1];
+  end;
+ if(fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable) and
+ (basescript.DynamicSectionEnable) and (finalfile.DynamicIndex>0) then
+  begin
+   finalfile.SymbolTable.SymbolValue[DynamicSymbolIndex-1]:=
+   finalfile.SectionAddress[finalfile.DynamicIndex-1];
+   finalfile.SymbolTable.SymbolSize[DynamicSymbolIndex-1]:=
+   finalfile.SectionSize[finalfile.DynamicIndex-1];
   end;
  {Generate the empty PE Symbol Table}
  if(fileclass=unifile_class_pe_file) and (basescript.NoSymbol=false) then
@@ -7307,6 +7741,15 @@ begin
    else
    Pqword(finalfile.SectionContent[finalfile.GotIndex-1])^:=
    finalfile.SectionAddress[finalfile.DynamicIndex-1];
+   if(basescript.Interpreter<>'') then
+    begin
+     if(finalfile.Bits=32) then
+     Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+2*sizeof(dword))^:=
+     basescript.BaseAddress+InterpreterInfo.DynamicLibraryResolveOffset
+     else
+     Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+2*sizeof(qword))^:=
+     basescript.BaseAddress+InterpreterInfo.DynamicLibraryResolveOffset;
+    end;
   end;
  {For Generate the Content of the Dynamic Contents}
  if(fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable) then
