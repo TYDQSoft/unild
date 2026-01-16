@@ -55,6 +55,27 @@ type unifile_elf_object_file_symbol_table=packed record
                              InterpreterHashTable:unifile_elf_interpreter_hash_table;
                              DynamicLibraryResolveOffset:SizeUint;
                              end;
+     unifile_elf_dynamic_library=packed record
+                                 SharedObjectName:string;
+                                 SymbolName:array of string;
+                                 SymbolNameHash:array of SizeUint;
+                                 SymbolCount:SizeUint;
+                                 end;
+     unifile_elf_dynamic_library_total=packed record
+                                       SharedObjectName:array of string;
+                                       SharedObjectCount:SizeUint;
+                                       HashTableEnable:boolean;
+                                       BucketCount:SizeUint;
+                                       BucketEnable:array of boolean;
+                                       BucketItem:array of SizeUint;
+                                       ChainCount:SizeUint;
+                                       ChainEnable:array of boolean;
+                                       ChainItem:array of SizeUint;
+                                       SymbolFileIndex:array of SizeUint;
+                                       SymbolName:array of string;
+                                       SymbolNameHash:array of SizeUint;
+                                       SymbolCount:SizeUint;
+                                       end;
      unifile_elf_object_file_parsed_relocation=packed record
                                                RelocationSection:string;
                                                RelocationSectionHash:SizeUint;
@@ -373,9 +394,9 @@ procedure unifile_total_free(var totalfile:unifile_elf_object_file_total);
 function unifile_total_check(totalfile:unifile_elf_object_file_total;Architecture:byte;Bits:byte):boolean;
 function unifile_parse(var totalfile:unifile_elf_object_file_total):unifile_elf_object_file_parsed;
 function unifile_parsed_to_first_stage(var basefile:unifile_elf_object_file_parsed;
-basescript:unild_script;SmartLinking:boolean):unifile_linked_file_stage;
+var basescript:unild_script;SmartLinking:boolean):unifile_linked_file_stage;
 procedure unifile_convert_file_to_final(var basefile:unifile_linked_file_stage;
-basescript:unild_script;filename:string;fileclass:byte);
+var basescript:unild_script;filename:string;fileclass:byte);
 
 implementation
 
@@ -480,8 +501,386 @@ begin
     end;
   end;
 end;
+procedure unifile_dynamic_library_total_initialize(var TotalLibrary:unifile_elf_dynamic_library_total);
+begin
+ TotalLibrary.HashTableEnable:=false;
+ TotalLibrary.SharedObjectCount:=0;
+ TotalLibrary.SymbolCount:=0;
+end;
+function unifile_read_elf_dynamic_library(DynamicLibraryPath:string;
+CheckArchitecture:word;CheckBits:byte):unifile_elf_dynamic_library;
+var fs:TFileStream;
+    SharedContent:Pointer;
+    i,j:SizeUint;
+    {For Acquire the Dynamic Symbol}
+    SearchOffset:Pointer;
+    SearchCount:SizeUint;
+    DynamicPointer:Pointer;
+    DynamicCount:SizeUint;
+    HashPointer:Pointer;
+    DynamicSymbolTablePointer:Pointer;
+    DynamicStringTablePointer:Pointer;
+    DynamicSymbolTableCount:SizeUint;
+    DynamicSharedObjectNameIndex:SizeUint;
+    {For Temporary Variables of Acquiring}
+    TempNum1,TempNum2:SizeUint;
+begin
+ {Read the Shared Object File}
+ fs:=TFileStream.Create(DynamicLibraryPath,fmOpenRead);
+ SharedContent:=allocmem(fs.Size);
+ fs.Read(SharedContent^,fs.Size);
+ fs.Free;
+ {Set the Shared Object Name to None as initial.}
+ Result.SharedObjectName:='';
+ {Then Check the Shared Object File}
+ if(elf_check_signature(Pelf32_header(SharedContent)^.elf_id)=false) then
+  begin
+   FreeMem(SharedContent);
+   writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF Format Dynamic Library.');
+   readln;
+   halt;
+  end;
+ if(CheckBits=32) and
+ (Pelf32_header(SharedContent)^.elf_id[elf_class_position]<>elf_class_32) then
+  begin
+   FreeMem(SharedContent);
+   writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF 32-bit Dynamic Library.');
+   readln;
+   halt;
+  end
+ else if(CheckBits=64) and
+ (Pelf64_header(SharedContent)^.elf_id[elf_class_position]<>elf_class_64) then
+  begin
+   FreeMem(SharedContent);
+   writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF 64-bit Dynamic Library.');
+   readln;
+   halt;
+  end;
+ if(CheckBits=32) then
+  begin
+   {Check the ELF File Type is the Shared Object}
+   if(Pelf32_header(SharedContent)^.elf_type<>elf_type_dynamic) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:File '+DynamicLibraryPath+' is not the Shared Object File.');
+     readln;
+     halt;
+    end;
+   {Check the Architecture of the Dynamic Library}
+   if(Pelf32_header(SharedContent)^.elf_machine<>CheckArchitecture) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF Dynamic Library with corresponding architecture.');
+     readln;
+     halt;
+    end;
+   {Get the Program Header Offset and its Count}
+   SearchOffset:=SharedContent+Pelf32_header(SharedContent)^.elf_program_header_offset;
+   SearchCount:=Pelf32_header(SharedContent)^.elf_program_header_number;
+   i:=1;
+   while(i<=SearchCount)do
+    begin
+     if(Pelf32_program_header(SearchOffset+(i-1)*sizeof(Pelf32_program_header))^.program_type=
+     elf_program_header_type_dynamic) then
+      begin
+       DynamicPointer:=
+       SharedContent+Pelf32_program_header(SearchOffset+(i-1)*
+       sizeof(Pelf32_program_header))^.program_offset;
+       DynamicCount:=Pelf32_program_header(SearchOffset+(i-1)*
+       sizeof(Pelf32_program_header))^.program_file_size div sizeof(elf32_dynamic_entry);
+       break;
+      end;
+     inc(i);
+    end;
+   if(i>SearchCount) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Cannot find dynamic section in Dynamic Library '+DynamicLibraryPath+
+     '.Dynamic Library is not vaild.');
+     readln;
+     halt;
+    end;
+   {Then find the .hash,.dynsym and .dynstr section.}
+   i:=1;
+   HashPointer:=nil; DynamicStringTablePointer:=nil; DynamicSymbolTablePointer:=nil;
+   DynamicSymbolTableCount:=0; DynamicSharedObjectNameIndex:=0;
+   while(i<=DynamicCount)do
+    begin
+     if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_hash) then
+      begin
+       HashPointer:=SharedContent+
+       Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_string_table) then
+      begin
+       DynamicStringTablePointer:=SharedContent+
+       Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_symbol_table) then
+      begin
+       DynamicSymbolTablePointer:=SharedContent+
+       Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_shared_object_name) then
+      begin
+       DynamicSharedObjectNameIndex:=
+       Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value;
+      end;
+     inc(i);
+    end;
+   if(HashPointer=nil) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Hash Table missing,cannot determine the symbol count of the library '+
+     DynamicLibraryPath);
+     readln;
+     halt;
+    end;
+   DynamicSymbolTableCount:=(Pdword(HashPointer)^-1) shr 1;
+   if(DynamicSymbolTablePointer=nil) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Dynamic Symbol Table Missing,cannot parse the dynamic symbol table.');
+     readln;
+     halt;
+    end;
+   if(DynamicStringTablePointer=nil) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Dynamic String Table Missing,cannot parse the dynamic symbol table.');
+     readln;
+     halt;
+    end;
+   Result.SharedObjectName:=PChar(DynamicStringTablePointer+DynamicSharedObjectNameIndex);
+   SetLength(Result.SymbolName,DynamicSymbolTableCount-1);
+   SetLength(Result.SymbolNameHash,DynamicSymbolTableCount-1);
+   i:=0; j:=2;
+   while(j<=DynamicSymbolTableCount)do
+    begin
+     if(elf32_reloc_type(Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf32_symbol_table_entry))^.symbol_info)<>elf_symbol_type_function) and
+     (elf32_reloc_type(Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf32_symbol_table_entry))^.symbol_info)<>elf_symbol_type_object) then
+      begin
+       inc(j); continue;
+      end;
+     inc(i);
+     Result.SymbolName[i-1]:=
+     PChar(DynamicStringTablePointer+Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf32_symbol_table_entry))^.symbol_name);
+     Result.SymbolNameHash[i-1]:=unihash_generate_value(Result.SymbolName[i-1],false);
+     inc(j);
+    end;
+   Result.SymbolCount:=i;
+  end
+ else if(CheckBits=64) then
+  begin
+   {Check the ELF File Type is the Shared Object}
+   if(Pelf64_header(SharedContent)^.elf_type<>elf_type_dynamic) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:File '+DynamicLibraryPath+' is not the Shared Object File.');
+     readln;
+     halt;
+    end;
+   {Check the Architecture of the Dynamic Library}
+   if(Pelf64_header(SharedContent)^.elf_machine<>CheckArchitecture) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF Dynamic Library with corresponding architecture.');
+     readln;
+     halt;
+    end;
+   {Get the Program Header Offset and its Count}
+   SearchOffset:=SharedContent+Pelf64_header(SharedContent)^.elf_program_header_offset;
+   SearchCount:=Pelf64_header(SharedContent)^.elf_program_header_number;
+   i:=1;
+   while(i<=SearchCount)do
+    begin
+     if(Pelf64_program_header(SearchOffset+(i-1)*sizeof(Pelf64_program_header))^.program_type=
+     elf_program_header_type_dynamic) then
+      begin
+       DynamicPointer:=
+       SharedContent+Pelf64_program_header(SearchOffset+(i-1)*
+       sizeof(Pelf64_program_header))^.program_offset;
+       DynamicCount:=
+       Pelf64_program_header(SearchOffset+(i-1)*
+       sizeof(Pelf64_program_header))^.program_file_size div sizeof(elf64_dynamic_entry);
+       break;
+      end;
+     inc(i);
+    end;
+   if(i>SearchCount) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Cannot find dynamic section in Dynamic Library '+DynamicLibraryPath+
+     '.Dynamic Library is not vaild.');
+     readln;
+     halt;
+    end;
+   {Then find the .hash,.dynsym and .dynstr section.}
+   i:=1;
+   HashPointer:=nil; DynamicStringTablePointer:=nil; DynamicSymbolTablePointer:=nil;
+   DynamicSymbolTableCount:=0; DynamicSharedObjectNameIndex:=0;
+   while(i<=DynamicCount)do
+    begin
+     if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_hash) then
+      begin
+       HashPointer:=SharedContent+
+       Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_string_table) then
+      begin
+       DynamicStringTablePointer:=SharedContent+
+       Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_symbol_table) then
+      begin
+       DynamicSymbolTablePointer:=SharedContent+
+       Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_shared_object_name) then
+      begin
+       DynamicSharedObjectNameIndex:=
+       Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value;
+      end;
+     inc(i);
+    end;
+   if(HashPointer=nil) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Hash Table missing,cannot determine the symbol count of the library '+
+     DynamicLibraryPath);
+     readln;
+     halt;
+    end;
+   DynamicSymbolTableCount:=(Pdword(HashPointer)^-1) shr 1;
+   if(DynamicSymbolTablePointer=nil) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Dynamic Symbol Table Missing,cannot parse the dynamic symbol table.');
+     readln;
+     halt;
+    end;
+   if(DynamicStringTablePointer=nil) then
+    begin
+     FreeMem(SharedContent);
+     writeln('ERROR:Dynamic String Table Missing,cannot parse the dynamic symbol table.');
+     readln;
+     halt;
+    end;
+   Result.SharedObjectName:=PChar(DynamicStringTablePointer+DynamicSharedObjectNameIndex);
+   SetLength(Result.SymbolName,DynamicSymbolTableCount-1);
+   SetLength(Result.SymbolNameHash,DynamicSymbolTableCount-1);
+   i:=0; j:=2;
+   while(j<=DynamicSymbolTableCount)do
+    begin
+     if(elf64_reloc_type(Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf64_symbol_table_entry))^.symbol_info)<>elf_symbol_type_function) and
+     (elf64_reloc_type(Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf64_symbol_table_entry))^.symbol_info)<>elf_symbol_type_object) then
+      begin
+       inc(j); continue;
+      end;
+     inc(i);
+     Result.SymbolName[i-1]:=
+     PChar(DynamicStringTablePointer+Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf64_symbol_table_entry))^.symbol_name);
+     Result.SymbolNameHash[i-1]:=unihash_generate_value(Result.SymbolName[i-1],false);
+     inc(j);
+    end;
+   Result.SymbolCount:=i;
+  end;
+end;
+procedure unifile_add_elf_dynamic_library_to_total(var TotalLibrary:unifile_elf_dynamic_library_total;
+SubDynamicLibrary:unifile_elf_dynamic_library);
+var i,StartPoint:SizeUint;
+begin
+ inc(TotalLibrary.SharedObjectCount);
+ SetLength(TotalLibrary.SharedObjectName,TotalLibrary.SharedObjectCount);
+ TotalLibrary.SharedObjectName[TotalLibrary.SharedObjectCount-1]:=
+ SubDynamicLibrary.SharedObjectName;
+ StartPoint:=TotalLibrary.SymbolCount+1;
+ inc(TotalLibrary.SymbolCount,SubDynamicLibrary.SymbolCount);
+ SetLength(TotalLibrary.SymbolFileIndex,TotalLibrary.SymbolCount);
+ SetLength(TotalLibrary.SymbolName,TotalLibrary.SymbolCount);
+ SetLength(TotalLibrary.SymbolNameHash,TotalLibrary.SymbolCount);
+ for i:=StartPoint to TotalLibrary.SymbolCount do
+  begin
+   TotalLibrary.SymbolFileIndex[i-1]:=TotalLibrary.SharedObjectCount;
+   TotalLibrary.SymbolName[i-1]:=SubDynamicLibrary.SymbolName[i-StartPoint];
+   TotalLibrary.SymbolNameHash[i-1]:=SubDynamicLibrary.SymbolNameHash[i-StartPoint];
+  end;
+end;
+procedure unifile_elf_dynamic_library_total_generate_hash_table(
+var TotalLibrary:unifile_elf_dynamic_library_total);
+var i,Index:SizeUint;
+    TempBool:boolean;
+begin
+ TotalLibrary.HashTableEnable:=true;
+ TotalLibrary.BucketCount:=TotalLibrary.SymbolCount*8 div 7;
+ SetLength(TotalLibrary.BucketEnable,TotalLibrary.SymbolCount+1);
+ SetLength(TotalLibrary.BucketItem,TotalLibrary.SymbolCount+1);
+ TotalLibrary.ChainCount:=TotalLibrary.SymbolCount;
+ SetLength(TotalLibrary.ChainEnable,TotalLibrary.SymbolCount+1);
+ SetLength(TotalLibrary.ChainItem,TotalLibrary.SymbolCount+1);
+ for i:=1 to TotalLibrary.SymbolCount do
+  begin
+   Index:=TotalLibrary.SymbolNameHash[i-1] mod TotalLibrary.BucketCount+1;
+   TempBool:=false;
+   if(TotalLibrary.BucketEnable[Index]=false) then
+    begin
+     TotalLibrary.BucketEnable[Index]:=true;
+     TotalLibrary.BucketItem[Index]:=i;
+    end
+   else
+    begin
+     Index:=TotalLibrary.BucketItem[Index];
+     if(TotalLibrary.SymbolNameHash[Index-1]=TotalLibrary.SymbolNameHash[i-1]) then TempBool:=true;
+     if(TempBool) then continue;
+     while(TotalLibrary.ChainEnable[Index])do
+      begin
+       if(TempBool) then break;
+       Index:=TotalLibrary.ChainItem[Index];
+      end;
+     if(TempBool) then continue;
+     TotalLibrary.ChainEnable[Index]:=true;
+     TotalLibrary.ChainItem[Index]:=i;
+    end;
+  end;
+end;
+function unifile_elf_dynamic_library_total_search_for_hash_table(
+TotalLibrary:unifile_elf_dynamic_library_total;TotalHash:SizeUint):boolean;
+var SearchIndex:SizeUint;
+begin
+ if(TotalLibrary.HashTableEnable=false) then exit(false);
+ SearchIndex:=TotalHash mod TotalLibrary.SymbolCount+1;
+ if(TotalLibrary.BucketEnable[SearchIndex]) then
+  begin
+   SearchIndex:=TotalLibrary.BucketItem[SearchIndex];
+   if(TotalLibrary.SymbolNameHash[SearchIndex-1]=TotalHash) then exit(true)
+   else
+    begin
+     while(TotalLibrary.ChainEnable[SearchIndex])do
+      begin
+       if(TotalLibrary.SymbolNameHash[SearchIndex]=TotalHash) then exit(true);
+       SearchIndex:=TotalLibrary.ChainItem[SearchIndex];
+      end;
+     Result:=false;
+    end;
+  end
+ else exit(false);
+end;
 function unifile_check_interpreter(InterpreterPath:string;CheckArchitecture:word;CheckBits:byte;
-basescript:unild_script):unifile_elf_interpreter;
+var basescript:unild_script):unifile_elf_interpreter;
 var fs:TFileStream;
     InterpreterContent:Pointer;
     i,j,FunctionIndex:SizeUint;
@@ -531,6 +930,15 @@ begin
   end;
  if(CheckBits=32) then
   begin
+   {Check the ELF File Type is the Shared Object}
+   if(Pelf32_header(InterpreterContent)^.elf_type<>elf_type_dynamic) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:File '+InterpreterPath+' is not the Shared Object File.');
+     readln;
+     halt;
+    end;
+   {Check the Interpreter is equal to the output file architecture}
    if(Pelf32_header(InterpreterContent)^.elf_machine<>CheckArchitecture) then
     begin
      FreeMem(InterpreterContent);
@@ -559,8 +967,7 @@ begin
    if(i>SearchCount) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Cannot find the dynamic symbol '+basescript.InterpreterDynamicLinkFunction
-     +' in interpreter '+InterpreterPath);
+     writeln('ERROR:Cannot find the dynamic section in interpreter '+InterpreterPath);
      readln;
      halt;
     end;
@@ -637,6 +1044,7 @@ begin
      Result.InterpreterHashTable.ChainHash[i-1]:=
      Result.InterpreterSymbolHash[Pdword(HashPointer+4+tempnum1*4+i*4)^];
     end;
+   DynamicSymbolCount:=Result.InterpreterHashTable.ChainCount;
    FunctionIndex:=unifile_search_for_interpreter_hash_table(
    Result.InterpreterHashTable,SearchFunctionHash);
    if(FunctionIndex=0) then
@@ -653,6 +1061,15 @@ begin
   end
  else if(CheckBits=64) then
   begin
+   {Check the ELF File Type is the Shared Object}
+   if(Pelf64_header(InterpreterContent)^.elf_type<>elf_type_dynamic) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:File '+InterpreterPath+' is not the Shared Object File.');
+     readln;
+     halt;
+    end;
+   {Check the Interpreter is equal to the output file architecture}
    if(Pelf64_header(InterpreterContent)^.elf_machine<>CheckArchitecture) then
     begin
      FreeMem(InterpreterContent);
@@ -681,8 +1098,7 @@ begin
    if(i>SearchCount) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Cannot find the dynamic symbol '+basescript.InterpreterDynamicLinkFunction
-     +' in interpreter '+InterpreterPath);
+     writeln('ERROR:Cannot find the dynamic section in interpreter '+InterpreterPath);
      readln;
      halt;
     end;
@@ -759,6 +1175,7 @@ begin
      Result.InterpreterHashTable.ChainHash[i-1]:=
      Result.InterpreterSymbolHash[Pdword(HashPointer+4+tempnum1*4+i*4)^];
     end;
+   DynamicSymbolCount:=Result.InterpreterHashTable.ChainCount;
    FunctionIndex:=unifile_search_for_interpreter_hash_table(
    Result.InterpreterHashTable,SearchFunctionHash);
    if(FunctionIndex=0) then
@@ -824,10 +1241,24 @@ begin
  if(Result.Bits=32) then
   begin
    Result.Architecture:=Pelf32_header(OriginalContent)^.elf_machine;
+   if(Pelf32_header(OriginalContent)^.elf_type>elf_type_relocatable) then
+    begin
+     FreeMem(OriginalContent);
+     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
+     readln;
+     halt;
+    end;
   end
  else if(Result.Bits=64) then
   begin
    Result.Architecture:=Pelf64_header(OriginalContent)^.elf_machine;
+   if(Pelf64_header(OriginalContent)^.elf_type>elf_type_relocatable) then
+    begin
+     FreeMem(OriginalContent);
+     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
+     readln;
+     halt;
+    end;
   end;
  Result.FileName:=ExtractFileName(fn);
  {After that,parse the elf file}
@@ -1026,8 +1457,28 @@ begin
    readln;
    halt;
   end;
- if(Result.Bits=32) then Result.Architecture:=Pelf32_header(OriginalContent)^.elf_machine
- else if(Result.Bits=64) then Result.Architecture:=Pelf64_header(OriginalContent)^.elf_machine;
+ if(Result.Bits=32) then
+  begin
+   Result.Architecture:=Pelf32_header(OriginalContent)^.elf_machine;
+   if(Pelf32_header(OriginalContent)^.elf_type>elf_type_relocatable) then
+    begin
+     FreeMem(OriginalContent);
+     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
+     readln;
+     halt;
+    end;
+  end
+ else if(Result.Bits=64) then
+  begin
+   Result.Architecture:=Pelf64_header(OriginalContent)^.elf_machine;
+   if(Pelf64_header(OriginalContent)^.elf_type>elf_type_relocatable) then
+    begin
+     FreeMem(OriginalContent);
+     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
+     readln;
+     halt;
+    end;
+  end;
  Result.FileName:=fn; SectionCount:=0;
  {After that,parse the elf file}
  if(Result.Bits=32) then
@@ -1751,7 +2202,7 @@ begin
  Result:=Index1;
 end;
 function unifile_parsed_to_first_stage(var basefile:unifile_elf_object_file_parsed;
-basescript:unild_script;SmartLinking:boolean):unifile_linked_file_stage;
+var basescript:unild_script;SmartLinking:boolean):unifile_linked_file_stage;
 var i,j,k,m,n,a,b,c,d,e,f,g,h:SizeInt;
     attributedata:byte;
     InternalOffset:SizeUint;
@@ -3562,7 +4013,7 @@ begin
  if(i<right) then unifile_quick_sort(SymbolTable,SymbolIndex,i,right);
  if(j>left) then unifile_quick_sort(SymbolTable,SymbolIndex,left,j);
 end;
-procedure unifile_output_final_file(outputfile:unifile_file_final;basescript:unild_script;
+procedure unifile_output_final_file(outputfile:unifile_file_final;var basescript:unild_script;
 filename:string;fileclass:byte);
 var fs:TFileStream;
     Content:Pointer;
@@ -3591,7 +4042,9 @@ begin
      else if(basescript.elfclass=unild_class_executable) and (basescript.NoFixedAddress) then
      Pelf32_header(Content)^.elf_type:=elf_type_dynamic
      else if(basescript.elfclass=unild_class_executable) then
-     Pelf32_header(Content)^.elf_type:=elf_type_executable;
+     Pelf32_header(Content)^.elf_type:=elf_type_executable
+     else if(basescript.elfclass=unild_class_core) then
+     Pelf32_header(Content)^.elf_type:=elf_type_core;
      Pelf32_header(Content)^.elf_machine:=outputfile.Architecture;
      Pelf32_header(Content)^.elf_version:=1;
      if(basescript.elfclass<>unild_class_relocatable) then
@@ -3871,7 +4324,9 @@ begin
      else if(basescript.elfclass=unild_class_executable) and (basescript.NoFixedAddress) then
      Pelf64_header(Content)^.elf_type:=elf_type_dynamic
      else if(basescript.elfclass=unild_class_executable) then
-     Pelf64_header(Content)^.elf_type:=elf_type_executable;
+     Pelf64_header(Content)^.elf_type:=elf_type_executable
+     else if(basescript.elfclass=unild_class_core) then
+     Pelf64_header(Content)^.elf_type:=elf_type_core;
      Pelf64_header(Content)^.elf_machine:=outputfile.Architecture;
      Pelf64_header(Content)^.elf_version:=1;
      if(basescript.elfclass<>unild_class_relocatable) then
@@ -4470,16 +4925,17 @@ begin
  FreeMem(content);
 end;
 procedure unifile_convert_file_to_final(var basefile:unifile_linked_file_stage;
-basescript:unild_script;filename:string;fileclass:byte);
+var basescript:unild_script;filename:string;fileclass:byte);
 var finalfile:unifile_file_final;
     {For Handle the file}
-    i,j,k,m,n,a,b:SizeUint;
+    i,j,k,m,n,a,b,c:SizeUint;
     FileResult:unifile_result;
     tempstr1:string;
     InclineSwitch:boolean;
     {For ELF File}
     DynamicCount:SizeUint;
     DynamicBool,GotBool,InitialBool,InitialArrayBool,FinalBool,FinalArrayBool:boolean;
+    SymbolVersionBool:boolean;
     PreInitialArrayBool:boolean;
     GotPltOffset:byte;
     tempstr:string;
@@ -4513,6 +4969,9 @@ var finalfile:unifile_file_final;
     InterpreterInfo:unifile_elf_interpreter;
     {For Got Alias Symbol Index and Dynamic Alias Symbol Index}
     GOTSymbolIndex,DynamicSymbolIndex:SizeUint;
+    {For Dynamic Library}
+    NeedDynamicLibraryTotal:boolean=false;
+    DynamicLibraryTotal:unifile_elf_dynamic_library_total;
 label SkipGot;
 begin
  DynamicBool:=false; GotBool:=false; GotPltOffset:=0;
@@ -5112,15 +5571,16 @@ begin
  i:=1;
  if(basescript.SectionCountExtra>0) then
   begin
+   c:=j;
    if(basescript.GlobalOffsetTableSectionEnable) and (finalfile.GotIndex>0) then
     begin
-     GotSymbolIndex:=j+basescript.GlobalOffsetTableSectionIndex;
+     GotSymbolIndex:=c+basescript.GlobalOffsetTableSectionIndex; inc(j);
     end
    else if(basescript.GlobalOffsetTableSectionEnable) then inc(i);
    if(basescript.DynamicSectionEnable) and (finalfile.DynamicIndex>0) and
    (not ((basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file))) then
     begin
-     DynamicSymbolIndex:=j+basescript.DynamicSectionIndex;
+     DynamicSymbolIndex:=c+basescript.DynamicSectionIndex; inc(j);
     end
    else if(basescript.DynamicSectionEnable) then inc(i);
   end;
@@ -5242,6 +5702,7 @@ begin
        if(basefile.SymbolTable.SymbolBinding[i-1]=elf_symbol_bind_global) then
         begin
          inc(k);
+         NeedDynamicLibraryTotal:=true;
          finalfile.DynamicSymbolTable.SymbolSectionIndex[k-1]:=0;
          finalfile.DynamicSymbolTable.SymbolName[k-1]:=basefile.SymbolTable.SymbolName[i-1];
          finalfile.DynamicSymbolTable.SymbolBinding[k-1]:=basefile.SymbolTable.SymbolBinding[i-1];
@@ -5269,6 +5730,7 @@ begin
        halt;
       end;
      inc(k);
+     NeedDynamicLibraryTotal:=true;
      finalfile.DynamicSymbolTable.SymbolSectionIndex[k-1]:=0;
      finalfile.DynamicSymbolTable.SymbolName[k-1]:=basefile.SymbolTable.SymbolName[i-1];
      finalfile.DynamicSymbolTable.SymbolBinding[k-1]:=basefile.SymbolTable.SymbolBinding[i-1];
@@ -5371,6 +5833,18 @@ begin
     end;
    inc(i);
   end;
+ {Then Generate the External Dynamic Symbol Table of the output file}
+ unifile_dynamic_library_total_initialize(DynamicLibraryTotal);
+ if(basescript.DynamicLibraryPathNameCount>0) and (NeedDynamicLibraryTotal) then
+  begin
+   for i:=1 to basescript.DynamicLibraryPathNameCount do
+    begin
+     unifile_add_elf_dynamic_library_to_total(DynamicLibraryTotal,
+     unifile_read_elf_dynamic_library(basescript.DynamicLibraryPathName[i-1],
+     finalfile.Architecture,finalfile.Bits));
+    end;
+   unifile_elf_dynamic_library_total_generate_hash_table(DynamicLibraryTotal);
+  end;
  {Then Generate the Dynamic Symbol Table Assist}
  finalfile.DynamicSymbolTableAssist.BucketCount:=finalfile.DynamicSymbolTable.SymbolCount*8 div 7;
  SetLength(finalfile.DynamicSymbolTableAssist.BucketEnable,finalfile.DynamicSymbolTableAssist.BucketCount+1);
@@ -5387,6 +5861,15 @@ begin
    finalfile.DynamicSymbolTableNewIndex[i-1]:=i;
    if(finalfile.DynamicSymbolTable.SymbolBinding[i-1]=elf_symbol_bind_local) then
    inc(finalfile.SymbolTableLocalCount);
+   if(finalfile.DynamicSymbolTable.SymbolSectionIndex[i-1]=0) and
+   (unifile_elf_dynamic_library_total_search_for_hash_table(DynamicLibraryTotal,
+   finalfile.DynamicSymbolTable.SymbolNameHash[i-1])=false) then
+    begin
+     writeln('ERROR:External Dynamic Symbol '+finalfile.DynamicSymbolTable.SymbolName[i-1]+' not found '+
+     'in the Linked Dynamic Symbol File.');
+     readln;
+     halt;
+    end;
    j:=finalfile.DynamicSymbolTable.SymbolNameHash[i-1] mod finalfile.DynamicSymbolTableAssist.BucketCount+1;
    if(finalfile.DynamicSymbolTableAssist.BucketEnable[j]=false) then
     begin
@@ -5416,10 +5899,21 @@ begin
  finalfile.DynamicSymbolTableNewIndex,1,finalfile.DynamicSymbolTable.SymbolCount);
  {Then Generate the Dynamic Table}
  DynamicCount:=0;
- InitialBool:=false; InitialArrayBool:=false;
+ InitialBool:=false; InitialArrayBool:=false; SymbolVersionBool:=false;
  FinalBool:=false; FinalArrayBool:=false; PreInitialArrayBool:=false;
  if(fileclass=unifile_class_elf_file) and (finalfile.DynamicIndex<>0) then
   begin
+   if(basescript.SharedLibraryName<>'') then
+    begin
+     inc(DynamicCount);
+     finalfile.DynamicList.DynamicCount:=DynamicCount;
+     SetLength(finalfile.DynamicList.DynamicType,DynamicCount);
+     finalfile.DynamicList.DynamicType[DynamicCount-1]:=elf_dynamic_type_shared_object_name;
+     SetLength(finalfile.DynamicList.DynamicSubType,DynamicCount);
+     finalfile.DynamicList.DynamicSubType[DynamicCount-1]:=0;
+     SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
+     finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicString:=basescript.SharedLibraryName;
+    end;
    for j:=1 to basescript.DynamicCount do
     begin
      inc(DynamicCount);
@@ -5436,7 +5930,7 @@ begin
      inc(DynamicCount);
      finalfile.DynamicList.DynamicCount:=DynamicCount;
      SetLength(finalfile.DynamicList.DynamicType,DynamicCount);
-     finalfile.DynamicList.DynamicType[DynamicCount-1]:=elf_dynamic_type_library_search_path;
+     finalfile.DynamicList.DynamicType[DynamicCount-1]:=elf_dynamic_type_run_path;
      SetLength(finalfile.DynamicList.DynamicSubType,DynamicCount);
      finalfile.DynamicList.DynamicSubType[DynamicCount-1]:=0;
      SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
@@ -5521,13 +6015,25 @@ begin
      SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
      finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicSection:='.got';
     end;
+   if(basescript.DebugSwitch) then
+    begin
+     inc(DynamicCount);
+     finalfile.DynamicList.DynamicCount:=DynamicCount;
+     SetLength(finalfile.DynamicList.DynamicType,DynamicCount);
+     finalfile.DynamicList.DynamicType[DynamicCount-1]:=elf_dynamic_type_debug;
+     SetLength(finalfile.DynamicList.DynamicSubType,DynamicCount);
+     finalfile.DynamicList.DynamicSubType[DynamicCount-1]:=unifile_dynamic_class_value;
+     SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
+     finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue:=0;
+    end;
    for i:=1 to finalfile.SectionCount do
     begin
      if(finalfile.SectionName[i-1]='.init') then InitialBool:=true
      else if(finalfile.SectionName[i-1]='.init_array') then InitialArrayBool:=true
      else if(finalfile.SectionName[i-1]='.fini') then FinalBool:=true
      else if(finalfile.SectionName[i-1]='.fini_array') then FinalArrayBool:=true
-     else if(finalfile.SectionName[i-1]='.preinit_array') then PreInitialArrayBool:=true;
+     else if(finalfile.SectionName[i-1]='.preinit_array') then PreInitialArrayBool:=true
+     else if(finalfile.SectionName[i-1]='.gnu_version') then SymbolVersionBool:=true;
     end;
    if(InitialBool) then
     begin
@@ -5592,6 +6098,26 @@ begin
      SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
      finalfile.DynamicList.DynamicItem[DynamicCount-2].DynamicSection:='.preinit_array';
      finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicSection:='.preinit_array';
+    end;
+   if(SymbolVersionBool) then
+    begin
+     inc(DynamicCount,3);
+     finalfile.DynamicList.DynamicCount:=DynamicCount;
+     SetLength(finalfile.DynamicList.DynamicType,DynamicCount);
+     finalfile.DynamicList.DynamicType[DynamicCount-3]:=elf_dynamic_type_version_symbol;
+     finalfile.DynamicList.DynamicType[DynamicCount-2]:=elf_dynamic_type_symbol_info_size;
+     finalfile.DynamicList.DynamicType[DynamicCount-1]:=elf_dynamic_type_symbol_info_entry;
+     SetLength(finalfile.DynamicList.DynamicSubType,DynamicCount);
+     finalfile.DynamicList.DynamicSubType[DynamicCount-3]:=unifile_dynamic_class_section;
+     finalfile.DynamicList.DynamicSubType[DynamicCount-2]:=unifile_dynamic_class_section;
+     finalfile.DynamicList.DynamicSubType[DynamicCount-1]:=unifile_dynamic_class_value;
+     SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
+     finalfile.DynamicList.DynamicItem[DynamicCount-3].DynamicSection:='.gnu_version';
+     finalfile.DynamicList.DynamicItem[DynamicCount-2].DynamicSection:='.gnu_version';
+     if(basefile.Bits=32) then
+     finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue:=sizeof(elf32_symbol_table_entry)
+     else
+     finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue:=sizeof(elf64_symbol_table_entry);
     end;
    inc(DynamicCount,2);
    finalfile.DynamicList.DynamicCount:=DynamicCount;
@@ -7898,19 +8424,25 @@ begin
          finalfile.SectionSize[finalfile.DynamicStringTableIndex-1];
         end;
       end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_initialization) then
+     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_initialization)
+     or(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_finalization)
+     or(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_initialize_array)
+     or(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_finalize_array)
+     or(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_preinitialize_array)then
       begin
        j:=1;
        while(j<=finalfile.SectionCount)do
         begin
-         if(finalfile.SectionName[j-1]='.init') then break;
+         if(finalfile.SectionName[j-1]=finalfile.DynamicList.DynamicItem[i-1].DynamicSection) then break;
          inc(j);
         end;
        if(finalfile.Bits=32) then
         begin
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type:=
+         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+
+         (i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type:=
          finalfile.DynamicList.DynamicType[i-1];
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value:=
+         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+
+         (i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value:=
          finalfile.SectionAddress[j-1];
         end
        else
@@ -7921,30 +8453,9 @@ begin
          finalfile.SectionAddress[j-1];
         end;
       end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_finalization) then
-      begin
-       j:=1;
-       while(j<=finalfile.SectionCount)do
-        begin
-         if(finalfile.SectionName[j-1]='.fini') then break;
-         inc(j);
-        end;
-       if(finalfile.Bits=32) then
-        begin
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionAddress[j-1];
-        end
-       else
-        begin
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionAddress[j-1];
-        end;
-      end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_needed) then
+     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_needed) or
+     (finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_shared_object_name) or
+     (finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_run_path) then
       begin
        j:=1;
        tempstr:=finalfile.DynamicList.DynamicItem[i-1].DynamicString;
@@ -7962,76 +8473,14 @@ begin
         end;
        inc(WritePointer1,length(tempstr)+1);
       end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_library_search_path) then
-      begin
-       j:=1;
-       tempstr:=finalfile.DynamicList.DynamicItem[i-1].DynamicString;
-       if(finalfile.Bits=32) then
-        begin
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value:=WritePointer1;
-        end
-       else
-        begin
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value:=WritePointer1;
-        end;
-       inc(WritePointer1,length(tempstr)+1);
-      end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_initialize_array) then
+     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_initialize_array_size)
+     or(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_finalize_array_size)
+     or(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_preinitialize_array_size) then
       begin
        j:=1;
        while(j<=finalfile.SectionCount)do
         begin
-         if(finalfile.SectionName[j-1]='.init_array') then break;
-         inc(j);
-        end;
-       if(finalfile.Bits=32) then
-        begin
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionAddress[j-1];
-        end
-       else
-        begin
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionAddress[j-1];
-        end;
-      end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_finalize_array) then
-      begin
-       j:=1;
-       while(j<=finalfile.SectionCount)do
-        begin
-         if(finalfile.SectionName[j-1]='.fini_array') then break;
-         inc(j);
-        end;
-       if(finalfile.Bits=32) then
-        begin
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionAddress[j-1];
-        end
-       else
-        begin
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionAddress[j-1];
-        end;
-      end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_initialize_array_size) then
-      begin
-       j:=1;
-       while(j<=finalfile.SectionCount)do
-        begin
-         if(finalfile.SectionName[j-1]='.init_array') then break;
+         if(finalfile.SectionName[j-1]=finalfile.DynamicList.DynamicItem[i-1].DynamicString) then break;
          inc(j);
         end;
        if(finalfile.Bits=32) then
@@ -8049,12 +8498,12 @@ begin
          finalfile.SectionSize[j-1];
         end;
       end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_finalize_array_size) then
+     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_symbol_info_size) then
       begin
        j:=1;
        while(j<=finalfile.SectionCount)do
         begin
-         if(finalfile.SectionName[j-1]='.fini_array') then break;
+         if(finalfile.SectionName[j-1]=finalfile.DynamicList.DynamicItem[i-1].DynamicString) then break;
          inc(j);
         end;
        if(finalfile.Bits=32) then
@@ -8072,12 +8521,12 @@ begin
          finalfile.SectionSize[j-1];
         end;
       end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_preinitialize_array) then
+     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_version_symbol) then
       begin
        j:=1;
        while(j<=finalfile.SectionCount)do
         begin
-         if(finalfile.SectionName[j-1]='.preinit_array') then break;
+         if(finalfile.SectionName[j-1]=finalfile.DynamicList.DynamicItem[i-1].DynamicString) then break;
          inc(j);
         end;
        if(finalfile.Bits=32) then
@@ -8093,29 +8542,6 @@ begin
          finalfile.DynamicList.DynamicType[i-1];
          Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value:=
          finalfile.SectionAddress[j-1];
-        end;
-      end
-     else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_preinitialize_array_size) then
-      begin
-       j:=1;
-       while(j<=finalfile.SectionCount)do
-        begin
-         if(finalfile.SectionName[j-1]='.preinit_array') then break;
-         inc(j);
-        end;
-       if(finalfile.Bits=32) then
-        begin
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionSize[j-1];
-        end
-       else
-        begin
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type:=
-         finalfile.DynamicList.DynamicType[i-1];
-         Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value:=
-         finalfile.SectionSize[j-1];
         end;
       end
      else

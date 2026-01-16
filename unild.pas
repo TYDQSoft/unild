@@ -169,6 +169,8 @@ begin
  writeln('  Specify the shared object(dynamic library) type of ELF file(ELF Only)');
  writeln('--executable');
  writeln('  Specify the executable type of ELF file(ELF Only)');
+ writeln('--core-file,--corefile');
+ writeln('  Specify the shared object(dynamic library) type of ELF file(ELF Only)');
  writeln('--fixed-address,--fixedaddress,--fixed-addr,--fixedaddr');
  writeln('  Specify the fixed address option.');
  writeln('--pie,--positionindependentexecutable,--position-independent-executable');
@@ -229,6 +231,12 @@ begin
  writeln('  Enable the Dynamic Section as the symbol of the file(Must in ELF File).');
  writeln('--dynamicalias,--dynamic-alias');
  writeln('  Set the Dynamic Section Alias as a symbol(Must Enable the Dynamic Symbol and in ELF File).');
+ writeln('--debug,--enable-debug,--enabledebug');
+ writeln('  Set the Debug Mode of the Output File(When in ELF File Format it is vaild).');
+ writeln('--shared-library-name,--shared-libraryname,--sharedlibraryname');
+ writeln('  Set the ELF Format Shared Library Internal Name for Dynamic Linking(ELF Only)');
+ writeln('--enable-ver,--enablever,--enable-version,--enableversion');
+ writeln('  Enable the Version of the ELF Format Files.');
  writeln('--help');
  writeln('  Show the help of the unild.');
 end;
@@ -238,7 +246,7 @@ var InputFileList:unifile_elf_object_file_total;
     LinkFileList:unifile_linked_file_stage;
     FileList:unild_filelist;
     {For Scanning}
-    i,j:SizeUint;
+    i,j,k:SizeUint;
     tempstr:string;
     {For Linking}
     LinkerScript:string='';
@@ -554,6 +562,10 @@ begin
     begin
      Script.elfclass:=unild_class_executable;
     end
+   else if(LowerCase(ParamStr(i))='--core-file') or (LowerCase(ParamStr(i))='--corefile') then
+    begin
+     Script.elfclass:=unild_class_core;
+    end
    else if(LowerCase(ParamStr(i))='--uefi') or (LowerCase(ParamStr(i))='--efi') then
     begin
      Script.IsEFIFile:=true;
@@ -580,6 +592,17 @@ begin
    or(LowerCase(ParamStr(i))='--fixed-addr') or (LowerCase(ParamStr(i))='--fixedaddr') then
     begin
      Script.NoFixedAddress:=false;
+    end
+   else if(LowerCase(ParamStr(i))='--debug') or (LowerCase(ParamStr(i))='--enable-debug')
+   or (LowerCase(ParamStr(i))='--enable-debug') then
+    begin
+     Script.DebugSwitch:=true;
+    end
+   else if(LowerCase(ParamStr(i))='--shared-library-name') or
+   (LowerCase(ParamStr(i))='--shared-libraryname') or
+   (LowerCase(ParamStr(i))='--sharedlibraryname') then
+    begin
+     Script.SharedLibraryName:=ParamStr(i+1); inc(i);
     end
    else if(LowerCase(ParamStr(i))='--pie') or
    (LowerCase(ParamStr(i))='--positionindependentexecutable') or
@@ -777,6 +800,11 @@ begin
     begin
      Script.DynamicSectionAlias:=ParamStr(i+1); inc(i);
     end
+   else if(LowerCase(ParamStr(i))='--version-enable') or (LowerCase(ParamStr(i))='--versionenable')
+   or(LowerCase(ParamStr(i))='--ver-enable') or (LowerCase(ParamStr(i))='--verenable') then
+    begin
+     Script.VersionSwitch:=true;
+    end
    else if(LowerCase(ParamStr(i))='--help') then
     begin
      unild_help;
@@ -794,6 +822,12 @@ begin
     end;
    inc(i);
   end;
+ if(ParamCount=0) then
+  begin
+   unild_help;
+   readln;
+   halt;
+  end;
  if(Script.Interpreter<>'') and (Script.IsEFIFile=false) then
   begin
    if(Script.elfclass=unild_class_relocatable) then
@@ -804,15 +838,11 @@ begin
     end;
    Script.NoFixedAddress:=true;
   end;
- if(ParamCount=0) then
-  begin
-   unild_help;
-   readln;
-   halt;
-  end;
  if(InputBits<>0) then Script.Bits:=InputBits else InputBits:=Script.Bits;
  if(LinkerScript<>'') then Script:=unild_script_read(LinkerScript)
- else Script:=unild_generate_default;
+ else if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
+ Script:=unild_generate_default_other_file
+ else Script:=unild_generate_default_elf_file;
  if(InputArchitecture<>OutputArchitecture) or (InputBits>OutputBits) then
   begin
    writeln('ERROR:Input Architecture '+Script.InputFormat+' and Output Architecture '+
@@ -872,6 +902,27 @@ begin
     end;
    SetLength(Script.DynamicPathWithSubDirectoryList,0);
    Script.DynamicPathWithSubDirectoryCount:=0;
+  end;
+ if(Script.DynamicPathCount>0) then
+  begin
+   for i:=1 to Script.DynamicPathCount do
+    begin
+     FileList:=unild_search_for_filelist(Script.DynamicPathWithSubDirectoryList[i-1],'*.so',false);
+     for j:=1 to FileList.Count do
+      begin
+       k:=1;
+       while(k<=Script.DynamicCount)do
+        begin
+         if(ExtractFileName(FileList.FilePath[j-1])=Script.DynamicLibrary[k-1]) then break;
+         inc(k);
+        end;
+       if(k>Script.DynamicCount) then continue;
+       inc(Script.DynamicLibraryPathNameCount);
+       SetLength(Script.DynamicLibraryPathName,Script.DynamicLibraryPathNameCount);
+       Script.DynamicLibraryPathName[Script.DynamicLibraryPathNameCount-1]:=
+       FileList.FilePath[j-1];
+      end;
+    end;
   end;
  if(Script.NoExternalLibrary=false) and (Script.NoFixedAddress=true)
  and(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false)

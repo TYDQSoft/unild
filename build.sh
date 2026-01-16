@@ -1,6 +1,12 @@
 	ARCH=$(uname -m)
+	USERNAME=$(whoami)
+	COMPILERPATH=/home/$USERNAME/source/compiler
 	CROSSARCH=$1
-	CUSTOMBIN=$2
+	CUSTOMCOMPILERPATH=$2
+	if [ "$CUSTOMCOMPILERPATH" != "" ]; then
+	 COMPILERPATH=$CUSTOMCOMPILERPATH
+	fi
+	CUSTOMBIN=$3
 	if [ "$ARCH" = "x86_64" ]; then
 	 CARCH="x64"
 	 CARCHNAME="x86_64"
@@ -51,6 +57,7 @@
 	 CCARCH="x64"
 	 CCARCHNAME="x86_64"
 	 CCARCHNAMEL="X86_64"
+	 CCFILEARCHNAME="x86-64"
 	 BUNAME="-XPx86_64-linux-gnu-"
 	 OCNAME="x86_64-linux-gnu-"
 	 BITS="64"
@@ -60,6 +67,7 @@
 	 CCARCH="a64"
 	 CCARCHNAME="aarch64"
 	 CCARCHNAMEL="AARCH64"
+	 CCFILEARCHNAME="aarch64"
 	 BUNAME="-XPaarch64-linux-gnu-"
 	 OCNAME="aarch64-linux-gnu-"
 	 BITS="64"
@@ -69,6 +77,7 @@
 	 CCARCH="rv64"
 	 CCARCHNAME="riscv64"
 	 CCARCHNAMEL="RISCV64"
+	 CCFILEARCHNAME="riscv64"
 	 BUNAME="-XPriscv64-linux-gnu-"
 	 OCNAME="riscv64-linux-gnu-"
 	 BITS="64"
@@ -78,6 +87,7 @@
 	 CCARCH="loongarch64"
 	 CCARCHNAME="loongarch64"
 	 CCARCHNAMEL="LOONGARCH"
+	 CCFILEARCHNAME="loongarch64"
 	 BUNAME="-XPloongarch64-linux-gnu-"
 	 OCNAME="loongarch64-linux-gnu-"
 	 BITS="64"
@@ -87,6 +97,7 @@
 	 CCARCH="386"
 	 CCARCHNAME="i386"
 	 CCARCHNAMEL="I386"
+	 CCFILEARCHNAME="i386"
 	 BUNAME="-XPi386-linux-gnu-"
 	 OCNAME="i386-linux-gnu-"
 	 BITS="32"
@@ -96,6 +107,7 @@
 	 CCARCH="arm"
 	 CCARCHNAME="arm"
 	 CCARCHNAMEL="ARM"
+	 CCFILEARCHNAME="arm"
 	 BUNAME="-XParm-linux-gnu-"
 	 OCNAME="arm-linux-gnu-"
 	 BITS="32"
@@ -105,6 +117,11 @@
 	 CCARCH=$CARCH
 	 CCARCHNAME=$CARCHNAME
 	 CCARCHNAMEL=$CARCHNAMEL
+	 if [ "$CCARCH" == "x86_64" ]; then
+	 CCFILEARCHNAME="x86-64"
+	 else
+	 CCFILEARCHNAME=$CCARCHNAME
+	 fi
 	 BUNAME=""
 	 OCNAME=""
 	 CCISONAME=$CISONAME
@@ -113,8 +130,17 @@
 	if [ "$CUSTOMBIN" != "" ]; then
 	 BUNAME="-XP"$CUSTOMBIN
 	fi
-	/home/tydq/source/compiler/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -Cg unild.pas
+	if [ "$CROSSARCH" == "" ]; then
+	$COMPILERPATH/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild -Cg unild.pas
+	elif [ "$CCARCH" == "$CARCH" ]; then
+	$COMPILERPATH/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild-$CCFILEARCHNAME -Cg unild.pas
+	else
+	$COMPILERPATH/ppcross$CCARCH -Mobjfpc $BUNAME -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild-$CCFILEARCHNAME -Cg unild.pas
+	fi
 	rm *.ppu 
 	rm *.o
+	if [ "$CROSSARCH" == "" ]; then
 	./unild --help
-	#/home/tydq/unild/unild --linker-script /home/tydq/unild/linkerscript.txt --input-file-path-with-subdir /home/tydq/BenchMark/Objects --output-filename lookup.elf --entry _start --verbose --noextlibrary --smartlinking --executable
+	elif [ "$CCARCH" == "$CARCH" ]; then
+	./unild-$CCFILEARCHNAME --help
+	fi

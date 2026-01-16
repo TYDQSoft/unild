@@ -40,6 +40,7 @@ type unild_item=packed record
                   NoExternalLibrary:boolean;
                   IsEFIFile:boolean;
                   EFIFileIndex:byte;
+                  SharedLibraryName:string;
                   DynamicLibraryPath:array of string;
                   DynamicPathCount:SizeUint;
                   DynamicLibrary:array of string;
@@ -68,9 +69,13 @@ type unild_item=packed record
                   GlobalOffsetTableAlias:string;
                   GlobalOffsetTableSectionEnable:boolean;
                   GlobalOffsetTableSectionIndex:word;
+                  DebugSwitch:boolean;
+                  VersionSwitch:boolean;
                   {Temporary Variables}
                   DynamicPathWithSubDirectoryList:array of string;
                   DynamicPathWithSubDirectoryCount:SizeUint;
+                  DynamicLibraryPathName:array of string;
+                  DynamicLibraryPathNameCount:SizeUint;
                   end;
      unild_line_item=packed record
                      Item:array of string;
@@ -89,6 +94,7 @@ const unild_item_offset:byte=0;
       unild_class_relocatable=1;
       unild_class_sharedobject=2;
       unild_class_executable=3;
+      unild_class_core=4;
       {For EFI File Structure}
       unild_class_application=1;
       unild_class_bootdriver=2;
@@ -103,7 +109,8 @@ function unild_script_match_mask(checkstr:string;mask:string):boolean;
 function unild_translate_string(str:string):string;
 function unild_str_to_int(str:string):SizeUint;
 function unild_script_read(filename:string):unild_script;
-function unild_generate_default:unild_script;
+function unild_generate_default_elf_file:unild_script;
+function unild_generate_default_other_file:unild_script;
 
 implementation
 
@@ -126,6 +133,8 @@ begin
  Script.DynamicSectionEnable:=false; Script.DynamicSectionIndex:=0;
  Script.GlobalOffsetTableAlias:='_GLOBAL_OFFSET_TABLE_';
  Script.GlobalOffsetTableSectionEnable:=false; Script.GlobalOffsetTableSectionIndex:=0;
+ Script.DebugSwitch:=false; Script.VersionSwitch:=false;
+ Script.DynamicLibraryPathNameCount:=0;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -653,9 +662,24 @@ begin
       begin
        Result.DynamicSectionEnable:=true;
       end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='debug_enable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='debugenable') then
+      begin
+       Result.DebugSwitch:=true;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='version_enable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='versionenable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='verenable') then
+      begin
+       Result.VersionSwitch:=true;
+      end
      else if(LowerCase(LineList.Line[i-1].Item[0])='relocatable') then
       begin
        Result.elfclass:=unild_class_relocatable;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='core') then
+      begin
+       Result.elfclass:=unild_class_core;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='executable') then
       begin
@@ -744,7 +768,7 @@ begin
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
          writeln('ERROR:GOT(Global Offset Table) Alias '+
-         'must be gotalias/got_alias(alignvalue).');
+         'must be gotalias/got_alias(alias).');
          readln;
          halt;
         end;
@@ -761,7 +785,25 @@ begin
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
          writeln('ERROR:Dynamic Section Alias '+
-         'must be dynamicalias/dynamic_alias(alignvalue).');
+         'must be dynamicalias/dynamic_alias(alias).');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='sharedlibraryname')
+     or(LowerCase(LineList.Line[i-1].Item[0])='shared_library_name')
+     or(LowerCase(LineList.Line[i-1].Item[0])='sharedlibrary_name') then
+      begin
+       if(LineList.Line[i-1].Count=4) then
+        begin
+         tempstr1:=LineList.Line[i-1].Item[2];
+         Result.DynamicSectionAlias:=tempstr1;
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:Shared Library Name(ELF Format) '+
+         'must be sharedlibraryname/shared_library_name/sharedlibrary_name(internal name).');
          readln;
          halt;
         end;
@@ -1503,23 +1545,30 @@ begin
  if(Result.elfclass=unild_class_relocatable) and (Result.NoSymbol) then Result.NoSymbol:=false;
  if(Result.elfclass=unild_class_relocatable) then Result.Interpreter:='';
  Result.SectionCountExtra:=0;
- if(Script.DynamicSectionEnable) then
+ if(not ((Result.IsUntypedBinary=false) and
+ (Result.IsEFIFile=false) and (Result.elfclass=unild_class_relocatable))) then
   begin
-   inc(Result.SectionCountExtra); Result.DynamicSectionIndex:=Result.SectionCountExtra;
-  end;
- if(Script.GlobalOffsetTableSectionEnable) then
-  begin
-   inc(Result.SectionCountExtra); Result.GlobalOffsetTableSectionIndex:=Result.SectionCountExtra;
+   if(Script.DynamicSectionEnable) then
+    begin
+     inc(Result.SectionCountExtra); Result.DynamicSectionIndex:=Result.SectionCountExtra;
+    end;
+   if(Script.GlobalOffsetTableSectionEnable) then
+    begin
+     inc(Result.SectionCountExtra); Result.GlobalOffsetTableSectionIndex:=Result.SectionCountExtra;
+    end;
   end;
  {Free the String List}
  StrList.Free;
 end;
-function unild_generate_default:unild_script;
+function unild_generate_default_elf_file:unild_script;
 var i:SizeUint;
 begin
  if(ScriptEnable) then Result:=Script;
- Result.SectionCount:=14; SetLength(Result.Section,14); i:=1;
- if(Script.EntryName='') then Script.EntryName:='_start';
+ if(Script.DebugSwitch) then Result.SectionCount:=19 else Result.SectionCount:=13;
+ if(Script.VersionSwitch) then inc(Result.SectionCount,3);
+ SetLength(Result.Section,19);
+ i:=1;
+ if(Result.EntryName='') then Result.EntryName:='_start';
  {Set the Section .text,can be read and execute}
  Result.Section[i-1].SectionName:='.text';
  Result.Section[i-1].SectionAttributeCount:=2;
@@ -1692,16 +1741,169 @@ begin
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
  Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.tbss.*';
  inc(i);
- {Set the Section .debug,can be read and write}
- Result.Section[i-1].SectionName:='.debug';
- Result.Section[i-1].SectionAttributeCount:=0;
- SetLength(Result.Section[i-1].SectionAttribute,0);
+ if(Script.DebugSwitch) then
+  begin
+   {Set the Section .debug_frame}
+   Result.Section[i-1].SectionName:='.debug_frame';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_frame.*';
+   inc(i);
+   {Set the Section .debug_info}
+   Result.Section[i-1].SectionName:='.debug_info';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_info.*';
+   inc(i);
+   {Set the Section .debug_aranges}
+   Result.Section[i-1].SectionName:='.debug_aranges';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_aranges.*';
+   inc(i);
+   {Set the Section .debug_ranges}
+   Result.Section[i-1].SectionName:='.debug_ranges';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_ranges.*';
+   inc(i);
+   {Set the Section .debug_line}
+   Result.Section[i-1].SectionName:='.debug_addrev';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_line.*';
+   inc(i);
+   {Set the Section .debug_addrev}
+   Result.Section[i-1].SectionName:='.debug_addrev';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_addrev.*';
+   inc(i);
+  end;
+ if(Script.VersionSwitch) then
+  begin
+   {Set the Section .gnu_version}
+   Result.Section[i-1].SectionName:='.gnu_version';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version.*';
+   inc(i);
+   {Set the Section .gnu_version}
+   Result.Section[i-1].SectionName:='.gnu_version_d';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_d.*';
+   inc(i);
+   {Set the Section .gnu_version}
+   Result.Section[i-1].SectionName:='.gnu_version_r';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_r.*';
+   inc(i);
+  end;
+end;
+function unild_generate_default_other_file:unild_script;
+var i:SizeUint;
+begin
+ if(ScriptEnable) then Result:=Script;
+ Result.SectionCount:=3; SetLength(Result.Section,3);
+ i:=1;
+ if(Result.EntryName='') then Result.EntryName:='_start';
+ if(Result.FileAlign=0) then Result.FileAlign:=$1000;
+ {Set the Section .text,can be read and execute}
+ Result.Section[i-1].SectionName:='.text';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='execute';
  Result.Section[i-1].SectionItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem,1);
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_frame.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.text.*';
+ inc(i);
+ {Set the Section .rodata,can be read and execute}
+ Result.Section[i-1].SectionName:='.rodata';
+ Result.Section[i-1].SectionAttributeCount:=1;
+ SetLength(Result.Section[i-1].SectionAttribute,1);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.rodata.*';
+ inc(i);
+ {Set the Section .data,can be read and write}
+ Result.Section[i-1].SectionName:='.data';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=4;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,4);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.data.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.sdata.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[2]:='.bss.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[3]:='.sbss.*';
  inc(i);
 end;
 
