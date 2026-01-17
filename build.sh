@@ -1,12 +1,9 @@
+	#ARCH means output Architecture,CROSSARCH means cross-compile the unild software to the target architecture which bash build.sh needs.If you must have custom binutils to compile,you ought to specified the custom binutils after cross-compile architecture parameter(due to usage of the custom binutils should be used in the cross-compile level).
 	ARCH=$(uname -m)
 	USERNAME=$(whoami)
-	COMPILERPATH=/home/$USERNAME/source/compiler
+	SOURCEPATH=/home/$USERNAME/source
 	CROSSARCH=$1
-	CUSTOMCOMPILERPATH=$2
-	if [ "$CUSTOMCOMPILERPATH" != "" ]; then
-	 COMPILERPATH=$CUSTOMCOMPILERPATH
-	fi
-	CUSTOMBIN=$3
+	CUSTOMBIN=$2
 	if [ "$ARCH" = "x86_64" ]; then
 	 CARCH="x64"
 	 CARCHNAME="x86_64"
@@ -131,11 +128,11 @@
 	 BUNAME="-XP"$CUSTOMBIN
 	fi
 	if [ "$CROSSARCH" == "" ]; then
-	$COMPILERPATH/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild -Cg unild.pas
+	$SOURCEPATH/compiler/ppc$CCARCH -Mobjfpc -n -va -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu$SOURCEPATH/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu$SOURCEPATH/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild -Cg unild.pas
 	elif [ "$CCARCH" == "$CARCH" ]; then
-	$COMPILERPATH/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild-$CCFILEARCHNAME -Cg unild.pas
+	$SOURCEPATH/compiler/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu$SOURCEPATH/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu$SOURCEPATH/rtl/units/$CCARCHNAME-linux -Fu$SOURCEPATH/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild-$CCFILEARCHNAME -Cg unild.pas
 	else
-	$COMPILERPATH/ppcross$CCARCH -Mobjfpc $BUNAME -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu/home/tydq/source/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu/home/tydq/source/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild-$CCFILEARCHNAME -Cg unild.pas
+	$SOURCEPATH/compiler/ppcross$CCARCH -Mobjfpc $BUNAME -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu$SOURCEPATH/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu$SOURCEPATH/rtl/units/$CCARCHNAME-linux -Fu$SOURCEPATH/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild-$CCFILEARCHNAME -Cg unild.pas
 	fi
 	rm *.ppu 
 	rm *.o

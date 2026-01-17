@@ -71,6 +71,7 @@ type unild_item=packed record
                   GlobalOffsetTableSectionIndex:word;
                   DebugSwitch:boolean;
                   VersionSwitch:boolean;
+                  EntryAsStartOfSection:boolean;
                   {Temporary Variables}
                   DynamicPathWithSubDirectoryList:array of string;
                   DynamicPathWithSubDirectoryCount:SizeUint;
@@ -134,7 +135,7 @@ begin
  Script.GlobalOffsetTableAlias:='_GLOBAL_OFFSET_TABLE_';
  Script.GlobalOffsetTableSectionEnable:=false; Script.GlobalOffsetTableSectionIndex:=0;
  Script.DebugSwitch:=false; Script.VersionSwitch:=false;
- Script.DynamicLibraryPathNameCount:=0;
+ Script.DynamicLibraryPathNameCount:=0; Script.EntryAsStartOfSection:=false;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -692,6 +693,12 @@ begin
      else if(LowerCase(LineList.Line[i-1].Item[0])='nosymbol') then
       begin
        Result.NoSymbol:=true;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='startonentry') or
+     (LowerCase(LineList.Line[i-1].Item[0])='start_onentry') or
+     (LowerCase(LineList.Line[i-1].Item[0])='startonentry') then
+      begin
+       Result.EntryAsStartOfSection:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='linkall') or
      (LowerCase(LineList.Line[i-1].Item[0])='nosmartlink') or
@@ -1826,9 +1833,10 @@ begin
    SetLength(Result.Section[i-1].SectionItem,1);
    Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
-   Result.Section[i-1].SectionItem[0].ItemCount:=1;
-   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemCount:=2;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
    Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.versym.*';
    inc(i);
    {Set the Section .gnu_version}
    Result.Section[i-1].SectionName:='.gnu_version_d';
@@ -1838,9 +1846,10 @@ begin
    SetLength(Result.Section[i-1].SectionItem,1);
    Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
-   Result.Section[i-1].SectionItem[0].ItemCount:=1;
-   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemCount:=2;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
    Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_d.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.verdef.*';
    inc(i);
    {Set the Section .gnu_version}
    Result.Section[i-1].SectionName:='.gnu_version_r';
@@ -1850,9 +1859,10 @@ begin
    SetLength(Result.Section[i-1].SectionItem,1);
    Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
-   Result.Section[i-1].SectionItem[0].ItemCount:=1;
-   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemCount:=2;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
    Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_r.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.verneed.*';
    inc(i);
   end;
 end;
@@ -1860,7 +1870,7 @@ function unild_generate_default_other_file:unild_script;
 var i:SizeUint;
 begin
  if(ScriptEnable) then Result:=Script;
- Result.SectionCount:=3; SetLength(Result.Section,3);
+ Result.SectionCount:=4; SetLength(Result.Section,4);
  i:=1;
  if(Result.EntryName='') then Result.EntryName:='_start';
  if(Result.FileAlign=0) then Result.FileAlign:=$1000;
@@ -1898,12 +1908,24 @@ begin
  Result.Section[i-1].SectionItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem,1);
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
- Result.Section[i-1].SectionItem[0].ItemCount:=4;
- SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,4);
+ Result.Section[i-1].SectionItem[0].ItemCount:=2;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
  Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.data.*';
- Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.sdata.*';
- Result.Section[i-1].SectionItem[0].ItemFilter[2]:='.bss.*';
- Result.Section[i-1].SectionItem[0].ItemFilter[3]:='.sbss.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.bss.*';
+ inc(i);
+ {Set the Section .data,can be read and write}
+ Result.Section[i-1].SectionName:='.sdata';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='write';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=2;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sdata.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.sbss.*';
  inc(i);
 end;
 

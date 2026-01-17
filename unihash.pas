@@ -22,22 +22,10 @@ function unihash_generate_value(str:string;SectionSwitch:boolean):qword;
 implementation
 
 procedure unihash_initialize;
-var SectionBool:array[1..16] of boolean;
-    i,j:SizeUint;
 begin
  randomize;
- for i:=1 to 16 do SectionBool[i]:=false;
- for i:=1 to 2 do
-  begin
-   j:=1+random(16);
-   while(SectionBool[j]) do j:=1+random(16);
-   SectionBool[j]:=true;
-   unihash_section_index[i]:=j;
-  end;
-end;
-function unihash_string_to_pointer(value:string):Pointer;
-begin
- unihash_string_to_pointer:=PPointer(@value)^;
+ unihash_section_index[1]:=1+random(12);
+ unihash_section_index[2]:=13+random(4);
 end;
 function unihash_rotate(value:Qword;shift:byte):Qword;
 begin
@@ -61,21 +49,21 @@ var q1,q2:qword;
 begin
  if(len>=8) then
   begin
-   q1:=Pqword(unihash_string_to_pointer(str))^;
-   q2:=Pqword(unihash_string_to_pointer(str)+len-8)^;
+   q1:=Pqword(str)^;
+   q2:=Pqword(Pointer(str)+len-8)^;
    unihash_hash_0to16:=unihash_mix(q1,unihash_rotate(q2+len,len),index) xor q2;
   end
  else if(len>=4) then
   begin
-   d1:=Pdword(unihash_string_to_pointer(str))^;
-   d2:=Pdword(unihash_string_to_pointer(str)+len-4)^;
+   d1:=Pdword(str)^;
+   d2:=Pdword(Pointer(str)+len-4)^;
    unihash_hash_0to16:=unihash_mix(len+Qword(d1) shl 3,d2,index);
   end
  else if(len>0) then
   begin
-   b1:=Pbyte(unihash_string_to_pointer(str))^;
-   b2:=Pbyte(unihash_string_to_pointer(str)+len shr 1)^;
-   b3:=Pbyte(unihash_string_to_pointer(str)+len-1)^;
+   b1:=Pbyte(str)^;
+   b2:=Pbyte(Pointer(str)+len shr 1)^;
+   b3:=Pbyte(Pointer(str)+len-1)^;
    d1:=b1+Dword(b2) shl 8;
    d2:=len+Dword(b3) shl 2;
    unihash_hash_0to16:=unihash_mix(d1,d2,index);
@@ -92,8 +80,8 @@ begin
  h:=len; g:=unihash_magic_number[index]*len; f:=g; offset:=0;
  while(len>=16)do
   begin
-   a:=Pqword(unihash_string_to_pointer(str)+offset)^;
-   b:=Pqword(unihash_string_to_pointer(str)+offset+8)^;
+   a:=Pqword(Pointer(str)+offset)^;
+   b:=Pqword(Pointer(str)+offset+8)^;
    h:=h xor unihash_mix(a,b,index);
    h:=unihash_rotate(h,unihash_rotate_number[index])*unihash_magic_number[index]+g;
    dec(len,16);
@@ -101,7 +89,7 @@ begin
   end;
  if(len>0) then
   begin
-   h:=h xor unihash_hash_0to16(Copy(str,offset,reallen-offset+1),reallen-offset+1,index);
+   h:=h xor unihash_hash_0to16(Copy(str,offset+1,reallen-offset),reallen-offset,index);
    h:=h*unihash_magic_number[index];
   end;
  h:=unihash_mix(h,f,index);
@@ -110,9 +98,9 @@ end;
 function unihash_generate_value(str:string;SectionSwitch:boolean):SizeUint;
 begin
  if(SectionSwitch) then
- Result:=unihash_generate_value_endline(str,unihash_section_index[1])
+ Result:=unihash_generate_value_endline(str,unihash_section_index[2])
  else
- Result:=unihash_generate_value_endline(str,unihash_section_index[2]);
+ Result:=unihash_generate_value_endline(str,unihash_section_index[1]);
 end;
 
 end.

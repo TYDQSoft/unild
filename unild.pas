@@ -97,17 +97,17 @@ begin
 end;
 procedure unild_help;
 begin
- writeln('unild(universal linker editor) version 0.0.2');
+ writeln('unild(universal linker editor) version 0.0.3');
  writeln('Commands:unild [parameters] '+
  '(linking commands are not case-sensitive,while file name and path not)');
  writeln('Tips:Implicit section will not be auto-generated in the file,'
  +'cannot be linked in specified section.');
  writeln('Available Commands:');
- writeln('--verbose,--cui');
+ writeln('--verbose,--cui,--console');
  writeln('  Enable the linking hint of the unild.');
- writeln('--untypedbinary,--binary');
+ writeln('--untypedbinary,--binary,--untyped,--notype');
  writeln('  Set the output format type to untyped binary(pure binary).');
- writeln('--version');
+ writeln('--version,--linker-version,--linkerversion');
  writeln('  Show the version of the unild.');
  writeln('--smartlinking,--smart,--smartlink,-smart-linking,--smart-link');
  writeln('  Enable the smart linking of the unild(disable the linking all option).');
@@ -170,7 +170,7 @@ begin
  writeln('--executable');
  writeln('  Specify the executable type of ELF file(ELF Only)');
  writeln('--core-file,--corefile');
- writeln('  Specify the shared object(dynamic library) type of ELF file(ELF Only)');
+ writeln('  Specify the Core type of ELF file(ELF Only)');
  writeln('--fixed-address,--fixedaddress,--fixed-addr,--fixedaddr');
  writeln('  Specify the fixed address option.');
  writeln('--pie,--positionindependentexecutable,--position-independent-executable');
@@ -261,7 +261,8 @@ begin
  unild_initialize;
  while(i<=ParamCount)do
   begin
-   if(LowerCase(ParamStr(i))='--verbose') or (LowerCase(ParamStr(i))='--cui') then
+   if(LowerCase(ParamStr(i))='--verbose') or (LowerCase(ParamStr(i))='--cui')
+   or(LowerCase(ParamStr(i))='--console') then
     begin
      Verbose:=true;
     end
@@ -270,9 +271,10 @@ begin
     begin
      Script.IsUntypedBinary:=true;
     end
-   else if(LowerCase(ParamStr(i))='--version') then
+   else if(LowerCase(ParamStr(i))='--version') or (LowerCase(ParamStr(i))='--linker-version')
+   or (LowerCase(ParamStr(i))='--linkerversion') then
     begin
-     writeln('unild(universal linker editor) version 0.0.2');
+     writeln('unild(universal linker editor) version 0.0.3');
      readln;
      halt;
     end
@@ -805,6 +807,12 @@ begin
     begin
      Script.VersionSwitch:=true;
     end
+   else if(LowerCase(ParamStr(i))='--start-on-entry') or
+   (LowerCase(ParamStr(i))='--start-onentry') or
+   (LowerCase(ParamStr(i))='--startonentry') then
+    begin
+     Script.EntryAsStartOfSection:=true;
+    end
    else if(LowerCase(ParamStr(i))='--help') then
     begin
      unild_help;
@@ -862,13 +870,19 @@ begin
    readln;
    halt;
   end;
+ if(Script.IsUntypedBinary) then Script.EntryAsStartOfSection:=true;
  if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) and (Script.Interpreter<>'') then
   begin
    Script.Interpreter:=''; Script.NoExternalLibrary:=false;
   end;
- if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
+ if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) and
+ (Script.elfclass=unild_class_sharedobject) then
   begin
    Script.Interpreter:='';
+  end;
+ if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
+  begin
+   Script.Interpreter:=''; Script.NoExternalLibrary:=true;
   end;
  if(Script.IsUntypedBinary) then
   begin
@@ -1056,7 +1070,6 @@ begin
   end;
  unifile_total_free(InputFileList);
 end;
-
 begin
  unild_parse_param;
 end.
