@@ -95,13 +95,32 @@ begin
   end;
  FindClose(SearchRec);
 end;
+function unild_check_path(path:string):boolean;
+var i,len:SizeUint;
+    tempstr:string;
+begin
+ len:=length(path); i:=len; tempstr:='';
+ while(i>0)do
+  begin
+   if(path[i]='/') or (path[i]='\') then
+    begin
+     tempstr:=Copy(path,1,i-1); break;
+    end;
+   dec(i);
+  end;
+ if(i=0) then exit(true)
+ else exit(DirectoryExists(tempstr));
+end;
 procedure unild_help;
 begin
  writeln('unild(universal linker editor) version 0.0.3');
  writeln('Commands:unild [parameters] '+
- '(linking commands are not case-sensitive,while file name and path not)');
- writeln('Tips:Implicit section will not be auto-generated in the file,'
+ '(Linking commands and command values are not case-sensitive,while the value,file name and path not)');
+ writeln('Tips 1:Implicit section will not be auto-generated in the file,'
  +'cannot be linked in specified section.');
+ writeln('Tips 2:Default is output an ELF Format File,but the ELF Format File Type should be specified'+
+ 'before the linking stage start.');
+ writeln('Tips 3:Sign $ and Sign 0x/0X are specified that the value is hexdecimal value.');
  writeln('Available Commands:');
  writeln('--verbose,--cui,--console');
  writeln('  Enable the linking hint of the unild.');
@@ -109,7 +128,7 @@ begin
  writeln('  Set the output format type to untyped binary(pure binary).');
  writeln('--version,--linker-version,--linkerversion');
  writeln('  Show the version of the unild.');
- writeln('--smartlinking,--smart,--smartlink,-smart-linking,--smart-link');
+ writeln('--smartlinking,--smart,--smartlink,--smart-linking,--smart-link');
  writeln('  Enable the smart linking of the unild(disable the linking all option).');
  writeln('--linkallsection,--linkallsect,--nosmartlinking,--linkall,--nosmart,--nosmartlinking'+
  '--no-smartlink,--no-smartlinking,--no-smart-linking');
@@ -123,11 +142,11 @@ begin
  writeln('--no-writable-got,--no-writablegot,--no-writable,--nowritable,--no-write,--nowrite');
  writeln('  Disable the Writable Got(Global Offset Table) section(ELF Files Only).');
  writeln('--interpreter,--interp');
- writeln('  Specify the path of the interpreter(ELF dynamic library and ELF executable only).');
+ writeln('  Specify the path of the interpreter(ELF PIE only,Default is no interpreter).');
  writeln('--output-file-name,--output-filename,--outputfilename,--output');
  writeln('  Specify output file name(Cannot lack,otherwise a error will thrown).');
  writeln('--input-file,--inputfile,--input');
- writeln('  Specify the input file name(Single File).');
+ writeln('  Specify the input file name(can be multiple).');
  writeln('--input-file-path,--input-filepath,--inputfilepath,--input-path,--inputpath');
  writeln('  Specify the path contains input file(without subdirectory).');
  writeln('--input-file-path-with-subdir,--input-filepath-with-subdir,--inputfilepath-with-subdir,'+
@@ -137,7 +156,7 @@ begin
  writeln('--dynamic-library,--dynamiclibrary,--shared-library,--sharedlibrary');
  writeln('  Specify the dynamic library name needed in output file.');
  writeln('--dynamic-library-search-path,--dynamiclibrary-search-path,--dynamiclibrary-searchpath,'+
- '--dynamiclibrarysearchpath,--shared-library-search-path,--sharedlibrary-search-path'+
+ '--dynamiclibrarysearchpath,--shared-library-search-path,--sharedlibrary-search-path,'+
  '--sharedlibrary-searchpath,--sharedlibrarysearchpath');
  writeln('  Specify the dynamic library search path for dynamic library(Only available when '+
  'dynamic library specified).');
@@ -155,7 +174,7 @@ begin
  writeln('  Specify the file align of the output file(EFI File Only)');
  writeln('--nodeflib,--nodefaultlib,--no-deflib,--no-defaultlib,--nodeflibrary,'+
  '--nodefaultlibrary,--no-deflibrary,--no-defaultlibrary');
- writeln('  Disable the Default Library of the file.');
+ writeln('  Disable the Default Library of the file(Only vaild in ELF Format File).');
  writeln('--noextlib,--noexternallib,--no-extlib,--no-extlib,--noextlibrary,'+
  '--noexternallibrary,--no-extlibrary,--no-externallibrary');
  writeln('  Disable the External Library of the file(ELF is optional while EFI is forced).');
@@ -163,18 +182,24 @@ begin
  writeln('  Specify the bits of the output file');
  writeln('--untypedbinaryalign,--untyped-binaryalign,--untyped-binary-align');
  writeln('  Specify the align of the untyped binary.');
+ writeln('--untypedbinaryaddressable,--untypedbinary-addressable');
+ writeln('  Enable the offset equal to the real address of the binary'+
+ '(Must enable the untyped binary switch).');
  writeln('--relocatable');
  writeln('  Specify the relocatable type of ELF file(ELF Only)');
  writeln('--sharedobject,--sharedlink');
  writeln('  Specify the shared object(dynamic library) type of ELF file(ELF Only)');
  writeln('--executable');
  writeln('  Specify the executable type of ELF file(ELF Only)');
- writeln('--core-file,--corefile');
+ writeln('--core-file,--corefile,--core');
  writeln('  Specify the Core type of ELF file(ELF Only)');
  writeln('--fixed-address,--fixedaddress,--fixed-addr,--fixedaddr');
  writeln('  Specify the fixed address option.');
  writeln('--pie,--positionindependentexecutable,--position-independent-executable');
- writeln('  Specify the PIE executable(Default in executable ELF file).');
+ writeln('  Specify the PIE executable.');
+ writeln('--static-pie,--staticpie,'+
+ '--staticpositionindependentexecutable,--static-position-independent-executable');
+ writeln('  Specify the Static PIE executable(Default in executable ELF file).');
  writeln('--efi-application,--uefi-application,--efiapplication,--uefiapplication,'+
  '--efi-app,--uefi-app,--efiapp,--uefiapp');
  writeln('  Specify the UEFI Application Type while set file type to EFI File.');
@@ -186,15 +211,15 @@ begin
  writeln('  Specify the UEFI Runtime Driver Type while set file type to EFI File.');
  writeln('--efi-rom,--uefi-rom,--efirom,--uefirom');
  writeln('  Specify the UEFI Runtime Driver Type while set file type to EFI File.');
- writeln('--input-format,--inputformat');
- writeln('  Specify the input format of the file.');
- writeln('  Vaild Options:i386/ia32,x86_64/x86/amd64,arm/arm32/aarch32,riscv32/rv32,riscv64/rv64,'+
- 'la32/la64');
- writeln('--output-format,--outputformat');
- writeln('  Specify the output format of the file.');
- writeln('  Vaild Options:i386/ia32,x86_64/x86/amd64,arm/arm32/aarch32,riscv32/rv32,riscv64/rv64,'+
- 'la32/la64');
- writeln('--entry,--entryname,--entry-name');
+ writeln('--input-arch,--inputarch,--input-architecture,--inputarchitecture');
+ writeln('  Specify the input architecture of the file.');
+ writeln('  Vaild Options:i386/ia32,x86_64/x86/amd64,arm/arm32/aarch32,arm64/aarch64,'+
+ 'riscv32/rv32,riscv64/rv64,loongarch32/la32,loongarch64/la64');
+ writeln('--output-arch,--outputarch,--output-architecture,--outputarchitecture');
+ writeln('  Specify the output architecture of the file.');
+ writeln('  Vaild Options:i386/ia32,x86_64/x86/amd64,arm/arm32/aarch32,arm64/aarch64,'+
+ 'riscv32/rv32,riscv64/rv64,loongarch32/la32,loongarch64/la64');
+ writeln('--entry,--entryname,--entry-name,--entry-symbol,--entrysymbol');
  writeln('  Specify the entry name of the output file.');
  writeln('--script-path,--scriptpath,--linker-script-path,--linker-scriptpath,--linkerscriptpath'+
  ',--linker-script,--linkerscript');
@@ -203,7 +228,7 @@ begin
  +'--linker-script-path-default,--linker-scriptpath-default,--linkerscriptpath-default'+
  ',--linker-script-default,--linkerscript-default');
  writeln('  Using the default linker script in internal program(if the linker script does not specified,'+
- 'same as no commnand about linker script).');
+ 'same as no command about linker script).');
  writeln('--gnu-linux,--gnulinux,--gnu,--linux');
  writeln('  Specify the ELF File Operating System to Linux(ELF File Only).');
  writeln('--application,--app');
@@ -214,23 +239,25 @@ begin
  writeln('  Specify the EFI File Format to UEFI Runtime Driver(EFI Type must be set for being vaild).');
  writeln('--efi,--uefi');
  writeln('  Specify the output file is EFI File.');
- writeln('--binaryalign,--binary-align');
- writeln('  Specify the untyped binary file align of untyped binary file.');
+ writeln('--untyped-binary-align,--untypedbinaryalign,--untypedbinary-align');
+ writeln('  Specify the untyped binary file align with the following value.');
  writeln('--disablefilesymbol,--disable-filesymbol,--disable-file-symbol');
  writeln('  Disable the File Symbol of the Output File.');
  writeln('--disablesectionsymbol,--disable-sectionsymbol,--disable-section-symbol');
  writeln('  Disable the Section Symbol of the Output File.');
  writeln('--interpreter-need-function,--interpreter-needfunction,--interpreterneedfunction'+
  '--interpret-need-function,--interpret-needfunction,--interpretneedfunction');
- writeln('  Specify the Demanded Function in the interpreter to call.');
+ writeln('  Specify the Demanded Function in the interpreter to call(Default is _dl_runtime_resolve.');
  writeln('--gotenable,--got-enable');
  writeln('  Enable the GOT(Global Offset Table) Section as the symbol of the file.');
  writeln('--gotalias,--got-alias');
  writeln('  Set the GOT(Global Offset Table) Section Alias as a symbol(Must Enable the GOT Symbol).');
+ writeln('  Default GOT Alias is _GLOBAL_OFFSET_TABLE_');
  writeln('--dynamicenable,--dynamic-enable');
  writeln('  Enable the Dynamic Section as the symbol of the file(Must in ELF File).');
  writeln('--dynamicalias,--dynamic-alias');
  writeln('  Set the Dynamic Section Alias as a symbol(Must Enable the Dynamic Symbol and in ELF File).');
+ writeln('  Default Dynamic Alias is _DYNAMIC');
  writeln('--debug,--enable-debug,--enabledebug');
  writeln('  Set the Debug Mode of the Output File(When in ELF File Format it is vaild).');
  writeln('--shared-library-name,--shared-libraryname,--sharedlibraryname');
@@ -266,6 +293,11 @@ begin
     begin
      Verbose:=true;
     end
+   else if(LowerCase(ParamStr(i))='--untypedbinaryaddressable') or
+   (LowerCase(ParamStr(i))='--untypedbinary-addressable') then
+    begin
+     Script.UntypedBinaryAddressable:=true;
+    end
    else if(LowerCase(ParamStr(i))='--untypedbinary') or (LowerCase(ParamStr(i))='--binary')
    or(LowerCase(ParamStr(i))='--untyped') or(LowerCase(ParamStr(i))='--notype') then
     begin
@@ -288,13 +320,13 @@ begin
    (LowerCase(ParamStr(i))='--disable-filesymbol') or
    (LowerCase(ParamStr(i))='--disable-file-symbol') then
     begin
-     Script.EnableFileInformation:=true;
+     Script.EnableFileInformation:=false;
     end
    else if(LowerCase(ParamStr(i))='--disablesectionsymbol') or
    (LowerCase(ParamStr(i))='--disable-sectionsymbol') or
    (LowerCase(ParamStr(i))='--disable-section-symbol') then
     begin
-     Script.EnableSectionInformation:=true;
+     Script.EnableSectionInformation:=false;
     end
    else if(LowerCase(ParamStr(i))='--linkallsection') or (LowerCase(ParamStr(i))='--linkallsect')
    or(LowerCase(ParamStr(i))='--nosmartlinking') or(LowerCase(ParamStr(i))='--linkall')
@@ -513,7 +545,9 @@ begin
      Script.FileAlign:=unild_str_to_int(ParamStr(i+1));
      inc(i);
     end
-   else if(LowerCase(ParamStr(i))='--binaryalign') or (LowerCase(ParamStr(i))='--binary-align') then
+   else if(LowerCase(ParamStr(i))='--untyped-binary-align')
+   or (LowerCase(ParamStr(i))='--untypedbinaryalign')
+   or (LowerCase(ParamStr(i))='--untypedbinary-align')then
     begin
      Script.UntypedBinaryAlign:=unild_str_to_int(ParamStr(i+1));
      inc(i);
@@ -564,7 +598,8 @@ begin
     begin
      Script.elfclass:=unild_class_executable;
     end
-   else if(LowerCase(ParamStr(i))='--core-file') or (LowerCase(ParamStr(i))='--corefile') then
+   else if(LowerCase(ParamStr(i))='--core-file') or (LowerCase(ParamStr(i))='--corefile')
+   or(LowerCase(ParamStr(i))='--core') then
     begin
      Script.elfclass:=unild_class_core;
     end
@@ -612,6 +647,13 @@ begin
     begin
      Script.elfclass:=unild_class_executable; Script.NoFixedAddress:=true;
     end
+   else if(LowerCase(ParamStr(i))='--staticpie') or (LowerCase(ParamStr(i))='--static-pie') or
+   (LowerCase(ParamStr(i))='--staticpositionindependentexecutable') or
+   (LowerCase(ParamStr(i))='--static-position-independent-executable') then
+    begin
+     Script.elfclass:=unild_class_executable; Script.NoFixedAddress:=true;
+     Script.Interpreter:='';
+    end
    else if(LowerCase(ParamStr(i))='--efi-application')
    or(LowerCase(ParamStr(i))='--uefi-application')
    or(LowerCase(ParamStr(i))='--efiapplication')
@@ -654,47 +696,48 @@ begin
      Script.IsEFIFile:=true; Script.EFIFileIndex:=unild_class_rom;
      Script.NoExternalLibrary:=true;
     end
-   else if(LowerCase(ParamStr(i))='--input-format')
-   or(LowerCase(ParamStr(i))='--inputformat') then
+   else if(LowerCase(ParamStr(i))='--input-arch') or(LowerCase(ParamStr(i))='--inputarch')
+   or(LowerCase(ParamStr(i))='--input-architecture')
+   or(LowerCase(ParamStr(i))='--inputarchitecture') then
     begin
-     Script.InputFormat:=LowerCase(ParamStr(i+1));
-     if(Script.OutputFormat='i386') or (Script.OutputFormat='ia32') then
+     tempstr:=LowerCase(ParamStr(i+1));
+     if(tempstr='i386') or (tempstr='ia32') then
       begin
        InputArchitecture:=elf_machine_386; InputBits:=32;
       end
-     else if(Script.OutputFormat='x86_64') or (Script.OutputFormat='x86')
-     or (Script.OutputFormat='amd64') then
+     else if(tempstr='x86_64') or (tempstr='x86')
+     or (tempstr='amd64') then
       begin
        InputArchitecture:=elf_machine_x86_64; InputBits:=64;
       end
-     else if(Script.OutputFormat='arm') or (Script.OutputFormat='arm32') or
-     (Script.OutputFormat='aarch32') then
+     else if(tempstr='arm') or (tempstr='arm32') or
+     (tempstr='aarch32') then
       begin
        InputArchitecture:=elf_machine_arm; InputBits:=32;
       end
-     else if(Script.OutputFormat='arm64') or (Script.OutputFormat='aarch64') then
+     else if(tempstr='arm64') or (tempstr='aarch64') then
       begin
        InputArchitecture:=elf_machine_aarch64; InputBits:=64;
       end
-     else if(Script.OutputFormat='riscv32') or (Script.OutputFormat='rv32') then
+     else if(tempstr='riscv32') or (tempstr='rv32') then
       begin
        InputArchitecture:=elf_machine_riscv; InputBits:=32;
       end
-     else if(Script.OutputFormat='riscv64') or (Script.OutputFormat='rv64') then
+     else if(tempstr='riscv64') or (tempstr='rv64') then
       begin
        InputArchitecture:=elf_machine_riscv; InputBits:=64;
       end
-     else if(Script.OutputFormat='loongarch32') or (Script.OutputFormat='la32') then
+     else if(tempstr='loongarch32') or (tempstr='la32') then
       begin
        InputArchitecture:=elf_machine_loongarch; InputBits:=32;
       end
-     else if(Script.OutputFormat='loongarch64') or (Script.OutputFormat='la64') then
+     else if(tempstr='loongarch64') or (tempstr='la64') then
       begin
        InputArchitecture:=elf_machine_loongarch; InputBits:=64;
       end
      else
       begin
-       writeln('ERROR:Unsupported Architecture '+Script.InputFormat);
+       writeln('ERROR:Unsupported Input Architecture '+tempstr);
        readln;
        halt;
       end;
@@ -706,54 +749,56 @@ begin
     begin
      Script.SystemIndex:=1;
     end
-   else if(LowerCase(ParamStr(i))='--output-format')
-   or(LowerCase(ParamStr(i))='--outputformat') then
+   else if(LowerCase(ParamStr(i))='--output-arch') or(LowerCase(ParamStr(i))='--outputarch')
+   or(LowerCase(ParamStr(i))='--output-architecture')
+   or(LowerCase(ParamStr(i))='--outputarchitecture') then
     begin
-     Script.OutputFormat:=LowerCase(ParamStr(i+1));
-     if(Script.OutputFormat='i386') or (Script.OutputFormat='ia32') then
+     tempstr:=LowerCase(ParamStr(i+1));
+     if(tempstr='i386') or (tempstr='ia32') then
       begin
        OutputArchitecture:=elf_machine_386; OutputBits:=32;
       end
-     else if(Script.OutputFormat='x86_64') or (Script.OutputFormat='x86')
-     or (Script.OutputFormat='amd64') then
+     else if(tempstr='x86_64') or (tempstr='x86')
+     or (tempstr='amd64') then
       begin
        OutputArchitecture:=elf_machine_x86_64; OutputBits:=64;
       end
-     else if(Script.OutputFormat='arm') or (Script.OutputFormat='arm32') or
-     (Script.OutputFormat='aarch32') then
+     else if(tempstr='arm') or (tempstr='arm32') or
+     (tempstr='aarch32') then
       begin
        OutputArchitecture:=elf_machine_arm; OutputBits:=32;
       end
-     else if(Script.OutputFormat='arm64') or (Script.OutputFormat='aarch64') then
+     else if(tempstr='arm64') or (tempstr='aarch64') then
       begin
        OutputArchitecture:=elf_machine_aarch64; OutputBits:=64;
       end
-     else if(Script.OutputFormat='riscv32') or (Script.OutputFormat='rv32') then
+     else if(tempstr='riscv32') or (tempstr='rv32') then
       begin
        OutputArchitecture:=elf_machine_riscv; OutputBits:=32;
       end
-     else if(Script.OutputFormat='riscv64') or (Script.OutputFormat='rv64') then
+     else if(tempstr='riscv64') or (tempstr='rv64') then
       begin
        OutputArchitecture:=elf_machine_riscv; OutputBits:=64;
       end
-     else if(Script.OutputFormat='loongarch32') or (Script.OutputFormat='la32') then
+     else if(tempstr='loongarch32') or (tempstr='la32') then
       begin
        OutputArchitecture:=elf_machine_loongarch; OutputBits:=32;
       end
-     else if(Script.OutputFormat='loongarch64') or (Script.OutputFormat='la64') then
+     else if(tempstr='loongarch64') or (tempstr='la64') then
       begin
        OutputArchitecture:=elf_machine_loongarch; OutputBits:=64;
       end
      else
       begin
-       writeln('ERROR:Unsupported Architecture '+Script.OutputFormat);
+       writeln('ERROR:Unsupported Output Architecture '+tempstr);
        readln;
        halt;
       end;
      inc(i);
     end
    else if(LowerCase(ParamStr(i))='--entry')or(LowerCase(ParamStr(i))='--entryname')
-   or(LowerCase(ParamStr(i))='--entry-name') then
+   or(LowerCase(ParamStr(i))='--entry-name')or(LowerCase(ParamStr(i))='--entry-symbol')
+   or(LowerCase(ParamStr(i))='--entrysymbol') then
     begin
      Script.EntryName:=LowerCase(ParamStr(i+1)); inc(i);
     end
@@ -832,10 +877,15 @@ begin
   end;
  if(ParamCount=0) then
   begin
+   writeln('No parameter,enter the help of the program.');
    unild_help;
    readln;
    halt;
   end;
+ if(InputArchitecture<>0) then Script.InputArchitecture:=InputArchitecture;
+ if(InputBits<>0) then Script.InputBits:=InputBits;
+ if(OutputArchitecture<>0) then Script.OutputArchitecture:=OutputArchitecture;
+ if(OutputBits<>0) then Script.OutputBits:=InputArchitecture;
  if(Script.Interpreter<>'') and (Script.IsEFIFile=false) then
   begin
    if(Script.elfclass=unild_class_relocatable) then
@@ -846,15 +896,14 @@ begin
     end;
    Script.NoFixedAddress:=true;
   end;
- if(InputBits<>0) then Script.Bits:=InputBits else InputBits:=Script.Bits;
+ if(Script.OutputFileName='') then Script.OutputFileName:=OutputFileName;
  if(LinkerScript<>'') then Script:=unild_script_read(LinkerScript)
  else if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
  Script:=unild_generate_default_other_file
  else Script:=unild_generate_default_elf_file;
- if(InputArchitecture<>OutputArchitecture) or (InputBits>OutputBits) then
+ if(unild_check_path(Script.OutputFileName)=false) then
   begin
-   writeln('ERROR:Input Architecture '+Script.InputFormat+' and Output Architecture '+
-   Script.OutputFormat+' does not correspond.');
+   writeln('ERROR:Output File Name '+Script.OutputFileName+' is not vaild due to path invaild.');
    readln;
    halt;
   end;
@@ -871,27 +920,15 @@ begin
    halt;
   end;
  if(Script.IsUntypedBinary) then Script.EntryAsStartOfSection:=true;
- if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) and (Script.Interpreter<>'') then
-  begin
-   Script.Interpreter:=''; Script.NoExternalLibrary:=false;
-  end;
  if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) and
- (Script.elfclass=unild_class_sharedobject) then
+ ((Script.elfclass=unild_class_sharedobject) or (Script.elfclass=unild_class_relocatable)
+ or(Script.elfclass=unild_class_core)) then
   begin
    Script.Interpreter:='';
   end;
  if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
   begin
    Script.Interpreter:=''; Script.NoExternalLibrary:=true;
-  end;
- if(Script.IsUntypedBinary) then
-  begin
-   if(Script.UntypedBinaryAlign=0) then
-    begin
-     writeln('ERROR:Untyped Binary Align not specified.');
-     readln;
-     halt;
-    end;
   end;
  if(Script.IsEFIFile) then
   begin
@@ -1044,8 +1081,14 @@ begin
    readln;
    halt;
   end;
- if(InputArchitecture<>0) and ((Script.Bits<>0) or (InputBits<>0)) and
- (unifile_total_check(InputFileList,InputArchitecture,InputBits)=false) then
+ if(Script.Bits<>0) and (unifile_total_check_bits(InputFileList,Script.Bits)=false) then
+  begin
+   writeln('ERROR:The input file bits does not match the specified bits.');
+   readln;
+   halt;
+  end;
+ if(Script.InputArchitecture<>0) and ((Script.Bits<>0) or (Script.InputBits<>0)) and
+ (unifile_total_check(InputFileList,Script.InputArchitecture,Script.InputBits)=false) then
   begin
    writeln('ERROR:The input file architecture does not match the specified architecture.');
    readln;
@@ -1058,11 +1101,11 @@ begin
  LinkFileList:=unifile_parsed_to_first_stage(ParseFileList,Script,Script.SmartLinking);
  if(Verbose) then writeln('Linking the input files......');
  if(Script.IsUntypedBinary) then
- unifile_convert_file_to_final(LinkFileList,Script,OutputFileName,unifile_class_binary_file)
+ unifile_convert_file_to_final(LinkFileList,Script,Script.OutputFileName,unifile_class_binary_file)
  else if(Script.IsEFIFile) then
- unifile_convert_file_to_final(LinkFileList,Script,OutputFileName,unifile_class_pe_file)
+ unifile_convert_file_to_final(LinkFileList,Script,Script.OutputFileName,unifile_class_pe_file)
  else
- unifile_convert_file_to_final(LinkFileList,Script,OutputFileName,unifile_class_elf_file);
+ unifile_convert_file_to_final(LinkFileList,Script,Script.OutputFileName,unifile_class_elf_file);
  if(Verbose) then
   begin
    writeln('Output File '+OutputFileName+' have generated!');

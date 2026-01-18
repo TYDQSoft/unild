@@ -1,4 +1,5 @@
-	#ARCH means output Architecture,CROSSARCH means cross-compile the unild software to the target architecture which bash build.sh needs.If you must have custom binutils to compile,you ought to specified the custom binutils after cross-compile architecture parameter(due to usage of the custom binutils should be used in the cross-compile level).
+	#! /bin/bash
+	#Parameter ARCH means output Architecture,and Parameter CROSSARCH means cross-compile the unild software to the target architecture which bash build.sh needs for executing and compiling.If you demand have custom binutils to compile,you ought to specified the custom binutils after cross-compile architecture parameter(due to usage of the custom binutils should be used in the cross-compile level). Source Path is the path to Free Pascal Compiler Source Code with including the object files compiled and compiled compilers.
 	ARCH=$(uname -m)
 	USERNAME=$(whoami)
 	SOURCEPATH=/home/$USERNAME/source
@@ -128,7 +129,7 @@
 	 BUNAME="-XP"$CUSTOMBIN
 	fi
 	if [ "$CROSSARCH" == "" ]; then
-	$SOURCEPATH/compiler/ppc$CCARCH -Mobjfpc -n -va -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu$SOURCEPATH/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu$SOURCEPATH/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild -Cg unild.pas
+	$SOURCEPATH/compiler/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu$SOURCEPATH/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu$SOURCEPATH/rtl/units/$CCARCHNAME-linux -Fu/home/tydq/source/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild -Cg unild.pas
 	elif [ "$CCARCH" == "$CARCH" ]; then
 	$SOURCEPATH/compiler/ppc$CCARCH -Mobjfpc -n -O3 -Si -Sc -Sg -Xd -Ur -CX -XXs -Xi -Fu$SOURCEPATH/compiler/$CCARCHNAME/units/$CCARCHNAME-linux -Fu$SOURCEPATH/rtl/units/$CCARCHNAME-linux -Fu$SOURCEPATH/packages/rtl-objpas/units/$CCARCHNAME-linux -dcpu$BITS -ounild-$CCFILEARCHNAME -Cg unild.pas
 	else

@@ -4,11 +4,12 @@ unit unildscript;
 
 interface
 
-uses Classes,SysUtils;
+uses Classes,SysUtils,binbase;
 
 type unild_item=packed record
                 ItemClass:SizeUint;
                 ItemOffset:SizeUInt;
+                ItemRelativeOffset:SizeUint;
                 ItemAlign:SizeUint;
                 ItemFilter:array of string;
                 ItemKeep:boolean;
@@ -28,6 +29,7 @@ type unild_item=packed record
                   SystemIndex:byte;
                   IsUntypedBinary:boolean;
                   UntypedBinaryAlign:Dword;
+                  UntypedBinaryAddressable:boolean;
                   Interpreter:string;
                   InterpreterDynamicLinkFunction:string;
                   FileAlign:SizeUint;
@@ -55,12 +57,15 @@ type unild_item=packed record
                   InputFilePath:array of string;
                   InputFileHaveSubPath:array of boolean;
                   InputFilePathCount:SizeUint;
-                  InputFormat:string;
+                  InputArchitecture:word;
+                  InputBits:byte;
+                  OutputArchitecture:word;
+                  OutputBits:byte;
+                  OutputFileName:string;
                   Bits:byte;
                   Section:array of unild_section;
                   SectionCount:Word;
                   SectionCountExtra:Word;
-                  OutputFormat:string;
                   EnableFileInformation:boolean;
                   EnableSectionInformation:boolean;
                   DynamicSectionAlias:string;
@@ -91,6 +96,7 @@ type unild_item=packed record
 const unild_item_offset:byte=0;
       unild_item_align:byte=1;
       unild_item_filter:byte=2;
+      unild_item_relativeoffset:byte=3;
       {For ELF File Structure}
       unild_class_relocatable=1;
       unild_class_sharedobject=2;
@@ -126,8 +132,10 @@ begin
  Script.EntryName:=''; Script.FileAlign:=0; Script.NoDefaultLibrary:=false;
  Script.NoExternalLibrary:=false; Script.NoSymbol:=false; Script.NoFixedAddress:=true;
  Script.SectionCount:=0; Script.SystemIndex:=0; Script.SmartLinking:=false; Script.LinkAll:=true;
- Script.NoExecutableStack:=false; Script.NoGotWritable:=false; Script.UntypedBinaryAlign:=0;
- Script.InputFormat:=''; Script.OutputFormat:=''; Script.IsUntypedBinary:=false;
+ Script.NoExecutableStack:=false; Script.NoGotWritable:=false;
+ Script.InputArchitecture:=0; Script.OutputArchitecture:=0;
+ Script.InputBits:=0; Script.OutputBits:=0;
+ Script.IsUntypedBinary:=false; Script.UntypedBinaryAlign:=0; Script.UntypedBinaryAddressable:=false;
  Script.DynamicPathWithSubDirectoryCount:=0;
  Script.EnableFileInformation:=true; Script.EnableSectionInformation:=true;
  Script.DynamicSectionAlias:='_DYNAMIC';
@@ -136,6 +144,7 @@ begin
  Script.GlobalOffsetTableSectionEnable:=false; Script.GlobalOffsetTableSectionIndex:=0;
  Script.DebugSwitch:=false; Script.VersionSwitch:=false;
  Script.DynamicLibraryPathNameCount:=0; Script.EntryAsStartOfSection:=false;
+ Script.OutputFileName:='';
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -487,10 +496,10 @@ begin
  i:=1; j:=1; len:=length(Content);
  while(i<=len)do
   begin
-   if(Copy(Content,i,2)='/*') then
+   if(Copy(Content,i,3)='###') then
     begin
-     j:=i+1; k:=0;
-     while(j<=len-1) and (Copy(Content,i,2)<>'*/') do
+     j:=i+3; k:=0;
+     while(j<=len-2) and (Copy(Content,j,3)<>'###') do
       begin
        if(Copy(Content,j,2)=#13#10) or (Copy(Content,j,2)=#10#13) then
         begin
@@ -505,6 +514,34 @@ begin
          inc(j); inc(row);
         end;
       end;
+     i:=j+3;
+     j:=LineList.LineCount+1;
+     inc(LineList.LineCount,k);
+     SetLength(LineList.Line,LineList.LineCount);
+     while(j<=LineList.LineCount)do
+      begin
+       LineList.Line[j-1].Count:=0; inc(j);
+      end;
+    end
+   else if(Copy(Content,i,2)='/*') then
+    begin
+     j:=i+1; k:=0;
+     while(j<=len-1) and (Copy(Content,j,2)<>'*/') do
+      begin
+       if(Copy(Content,j,2)=#13#10) or (Copy(Content,j,2)=#10#13) then
+        begin
+         inc(j,2); inc(k); row:=1; continue;
+        end
+       else if(Content[j]=#13) or (Content[j]=#10) then
+        begin
+         inc(j); inc(k); row:=1; continue;
+        end
+       else
+        begin
+         inc(j); inc(row);
+        end;
+      end;
+     i:=j+2;
      j:=LineList.LineCount+1;
      inc(LineList.LineCount,k);
      SetLength(LineList.Line,LineList.LineCount);
@@ -515,7 +552,7 @@ begin
     end
    else if(Copy(content,i,2)='//') or (content[i]='#') then
     begin
-     j:=i+1;
+     if(Copy(content,i,2)='//') then j:=i+2 else j:=i+1;
      while(j<=len-1) do
       begin
        if(Copy(Content,j,2)=#13#10) or (Copy(Content,j,2)=#10#13) then
@@ -620,6 +657,15 @@ begin
       begin
        Result.NoExecutableStack:=true;
       end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='pie') then
+      begin
+       Result.NoFixedAddress:=true;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='static_pie') or
+     (LowerCase(LineList.Line[i-1].Item[0])='staticpie') then
+      begin
+       Result.NoFixedAddress:=true; Result.Interpreter:='';
+      end
      else if(LowerCase(LineList.Line[i-1].Item[0])='disablefilesymbol') or
      (LowerCase(LineList.Line[i-1].Item[0])='disable_filesymbol') or
      (LowerCase(LineList.Line[i-1].Item[0])='disable_file_symbol') then
@@ -633,25 +679,23 @@ begin
        Result.EnableSectionInformation:=false;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='nogotwritable') or
-     (LowerCase(LineList.Line[i-1].Item[0])='gotnotwriteable') then
+     (LowerCase(LineList.Line[i-1].Item[0])='gotnotwriteable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='nowritable') then
       begin
        Result.NoGotWritable:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='nodeflib') or
+     (LowerCase(LineList.Line[i-1].Item[0])='nodefaultlib') or
      (LowerCase(LineList.Line[i-1].Item[0])='nodefaultlibrary') then
       begin
        Result.NoDefaultLibrary:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='noextlib') or
+     (LowerCase(LineList.Line[i-1].Item[0])='noexterallib') or
      (LowerCase(LineList.Line[i-1].Item[0])='noexterallibrary') then
       begin
        Result.NoExternalLibrary:=true;
        if(not Result.NoDefaultLibrary) then Result.NoDefaultLibrary:=true;
-      end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='sharedobject') or
-     (LowerCase(LineList.Line[i-1].Item[0])='sharedlibrary') then
-      begin
-       Result.elfclass:=unild_class_sharedobject;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='got_enable') or
      (LowerCase(LineList.Line[i-1].Item[0])='gotenable') then
@@ -670,9 +714,15 @@ begin
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='version_enable') or
      (LowerCase(LineList.Line[i-1].Item[0])='versionenable') or
-     (LowerCase(LineList.Line[i-1].Item[0])='verenable') then
+     (LowerCase(LineList.Line[i-1].Item[0])='verenable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='ver_enable')  then
       begin
        Result.VersionSwitch:=true;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='sharedobject') or
+     (LowerCase(LineList.Line[i-1].Item[0])='sharedlibrary') then
+      begin
+       Result.elfclass:=unild_class_sharedobject;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='relocatable') then
       begin
@@ -690,28 +740,41 @@ begin
       begin
        Result.Symbolic:=true;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='nosymbol') then
+     else if(LowerCase(LineList.Line[i-1].Item[0])='entryasstart') then
+      begin
+       Result.EntryAsStartOfSection:=true;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='nosymbol')
+     or(LowerCase(LineList.Line[i-1].Item[0])='deletesymbol')
+     or(LowerCase(LineList.Line[i-1].Item[0])='delete_symbol')
+     or(LowerCase(LineList.Line[i-1].Item[0])='stripsymbol')
+     or(LowerCase(LineList.Line[i-1].Item[0])='strip_symbol')
+     or(LowerCase(LineList.Line[i-1].Item[0])='discardsymbol')
+     or(LowerCase(LineList.Line[i-1].Item[0])='discard_symbol')then
       begin
        Result.NoSymbol:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='startonentry') or
      (LowerCase(LineList.Line[i-1].Item[0])='start_onentry') or
-     (LowerCase(LineList.Line[i-1].Item[0])='startonentry') then
+     (LowerCase(LineList.Line[i-1].Item[0])='start_on_entry') then
       begin
        Result.EntryAsStartOfSection:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='linkall') or
      (LowerCase(LineList.Line[i-1].Item[0])='nosmartlink') or
-     (LowerCase(LineList.Line[i-1].Item[0])='nosmartlinking') then
+     (LowerCase(LineList.Line[i-1].Item[0])='nosmartlinking') or
+     (LowerCase(LineList.Line[i-1].Item[0])='nosmart')then
       begin
        Result.LinkAll:=true; Result.SmartLinking:=false;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='untypedbinary') then
+     else if(LowerCase(LineList.Line[i-1].Item[0])='untypedbinary')
+     or(LowerCase(LineList.Line[i-1].Item[0])='untyped_binary') then
       begin
        Result.IsUntypedBinary:=true;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='smartlinking') or
-     (LowerCase(LineList.Line[i-1].Item[0])='smartlink') then
+     (LowerCase(LineList.Line[i-1].Item[0])='smartlink') or
+     (LowerCase(LineList.Line[i-1].Item[0])='smart') then
       begin
        Result.SmartLinking:=true; Result.LinkAll:=false;
       end
@@ -755,7 +818,7 @@ begin
      or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtime_driver')
      or(LowerCase(LineList.Line[i-1].Item[0])='efiruntimedrv')
      or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtimedrv')
-     or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtime-drv')
+     or(LowerCase(LineList.Line[i-1].Item[0])='efi_runtime_drv')
      or(LowerCase(LineList.Line[i-1].Item[0])='uefi_runtime_driver')
      or(LowerCase(LineList.Line[i-1].Item[0])='uefi_runtimedriver')
      or(LowerCase(LineList.Line[i-1].Item[0])='uefiruntimedriver')then
@@ -804,12 +867,12 @@ begin
        if(LineList.Line[i-1].Count=4) then
         begin
          tempstr1:=LineList.Line[i-1].Item[2];
-         Result.DynamicSectionAlias:=tempstr1;
+         Result.SharedLibraryName:=tempstr1;
         end
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Shared Library Name(ELF Format) '+
+         writeln('ERROR:Shared Library Name(filename) '+
          'must be sharedlibraryname/shared_library_name/sharedlibrary_name(internal name).');
          readln;
          halt;
@@ -831,8 +894,9 @@ begin
          halt;
         end;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='binaryalign')
-     or(LowerCase(LineList.Line[i-1].Item[0])='binary_align') then
+     else if(LowerCase(LineList.Line[i-1].Item[0])='untypedbinaryalign')
+     or(LowerCase(LineList.Line[i-1].Item[0])='untypedbinary_align')
+     or(LowerCase(LineList.Line[i-1].Item[0])='untyped_binary_align')then
       begin
        if(LineList.Line[i-1].Count=4) and (Result.UntypedBinaryAlign=0) then
         begin
@@ -843,7 +907,7 @@ begin
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Binary align must be binaryalign(alignvalue) and not define at least twice.');
+         writeln('ERROR:Binary align must be binaryalign(alignvalue).');
          readln;
          halt;
         end;
@@ -996,20 +1060,20 @@ begin
                inc(Result.DynamicCount);
                SetLength(Result.DynamicLibrary,Result.DynamicCount);
                Result.DynamicLibrary[Result.DynamicCount-1]:=
-               Copy(tempstr1,2,length(tempstr1)-2);
+               ExtractFileName(Copy(tempstr1,2,length(tempstr1)-2));
               end
              else
               begin
                inc(Result.DynamicCount);
                SetLength(Result.DynamicLibrary,Result.DynamicCount);
-               Result.DynamicLibrary[Result.DynamicCount-1]:=tempstr1;
+               Result.DynamicLibrary[Result.DynamicCount-1]:=ExtractFileName(tempstr1);
               end;
             end
            else
             begin
              inc(Result.DynamicCount);
              SetLength(Result.DynamicLibrary,Result.DynamicCount);
-             Result.DynamicLibrary[Result.DynamicCount-1]:=tempstr1;
+             Result.DynamicLibrary[Result.DynamicCount-1]:=ExtractFileName(tempstr1);
             end;
            j:=k+1;
           end;
@@ -1018,7 +1082,7 @@ begin
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
          writeln('ERROR:Dynamic Library Name must be dynamiclibrary/dynamic_library'
-         +'/sharedlibrary/shared_library(Libraryname)');
+         +'/sharedlibrary/shared_library(Libraryname/LibraryPath)');
          readln;
          halt;
         end;
@@ -1030,10 +1094,9 @@ begin
      or(LowerCase(LineList.Line[i-1].Item[0])='dynamiclibrary_searchpath')
      or(LowerCase(LineList.Line[i-1].Item[0])='sharedlibrarysearchpath')
      or(LowerCase(LineList.Line[i-1].Item[0])='shared_library_search_path')
-     or(LowerCase(LineList.Line[i-1].Item[0])='shared_library_search_path')
      or(LowerCase(LineList.Line[i-1].Item[0])='shared_library_searchpath')
      or(LowerCase(LineList.Line[i-1].Item[0])='sharedlibrary_search_path')
-     or(LowerCase(LineList.Line[i-1].Item[0])='sharedlibrary_searchpath')  then
+     or(LowerCase(LineList.Line[i-1].Item[0])='sharedlibrary_searchpath') then
       begin
        if(LineList.Line[i-1].Count>=4) then
         begin
@@ -1170,8 +1233,10 @@ begin
          halt;
         end;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='output_format')
-     or(LowerCase(LineList.Line[i-1].Item[0])='outputformat') then
+     else if(LowerCase(LineList.Line[i-1].Item[0])='output_architecture')
+     or(LowerCase(LineList.Line[i-1].Item[0])='outputarchitecture')
+     or(LowerCase(LineList.Line[i-1].Item[0])='output_arch')
+     or(LowerCase(LineList.Line[i-1].Item[0])='outputarch') then
       begin
        if(LineList.Line[i-1].Count=4) then
         begin
@@ -1179,16 +1244,117 @@ begin
          if(length(tempstr1)>=2) then
           begin
            if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-           Result.OutputFormat:=Copy(tempstr1,2,length(tempstr1)-2)
-           else
-           Result.OutputFormat:=tempstr1;
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+          end;
+         if(tempstr1='i386') or (tempstr1='ia32') then
+          begin
+           Result.InputArchitecture:=elf_machine_386; Result.InputBits:=32;
           end
-         else Result.OutputFormat:=tempstr1;
+         else if(tempstr1='x86_64') or (tempstr1='x86')
+         or (tempstr1='amd64') then
+          begin
+           Result.InputArchitecture:=elf_machine_x86_64; Result.InputBits:=64;
+          end
+         else if(tempstr1='arm') or (tempstr1='arm32') or
+         (tempstr1='aarch32') then
+          begin
+           Result.InputArchitecture:=elf_machine_arm; Result.InputBits:=32;
+          end
+         else if(tempstr1='arm64') or (tempstr1='aarch64') then
+          begin
+           Result.InputArchitecture:=elf_machine_aarch64; Result.InputBits:=64;
+          end
+         else if(tempstr1='riscv32') or (tempstr1='rv32') then
+          begin
+           Result.InputArchitecture:=elf_machine_riscv; Result.InputBits:=32;
+          end
+         else if(tempstr1='riscv64') or (tempstr1='rv64') then
+          begin
+           Result.InputArchitecture:=elf_machine_riscv; Result.InputBits:=64;
+          end
+         else if(tempstr1='loongarch32') or (tempstr1='la32') then
+          begin
+           Result.InputArchitecture:=elf_machine_loongarch; Result.InputBits:=32;
+          end
+         else if(tempstr1='loongarch64') or (tempstr1='la64') then
+          begin
+           Result.InputArchitecture:=elf_machine_loongarch; Result.InputBits:=64;
+          end
+         else
+          begin
+           writeln('ERROR:Unsupported Architecture '+tempstr1);
+           readln;
+           halt;
+          end;
         end
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Output format must be output_format/outputformat(format).');
+         writeln('ERROR:Output Architecture must be '+
+         'output_architecture/outputarchitecture/output_arch/outputarch(Architecture).');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='input_architecture')
+     or(LowerCase(LineList.Line[i-1].Item[0])='inputarchitecture')
+     or(LowerCase(LineList.Line[i-1].Item[0])='input_arch')
+     or(LowerCase(LineList.Line[i-1].Item[0])='inputarch') then
+      begin
+       if(LineList.Line[i-1].Count=4) then
+        begin
+         tempstr1:=LowerCase(LineList.Line[i-1].Item[2]);
+         if(length(tempstr1)>=2) then
+          begin
+           if(tempstr1[1]='"') or (tempstr1[1]=#39) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+          end;
+         if(tempstr1='i386') or (tempstr1='ia32') then
+          begin
+           Result.OutputArchitecture:=elf_machine_386; Result.OutputBits:=32;
+          end
+         else if(tempstr1='x86_64') or (tempstr1='x86')
+         or (tempstr1='amd64') then
+          begin
+           Result.OutputArchitecture:=elf_machine_x86_64; Result.OutputBits:=64;
+          end
+         else if(tempstr1='arm') or (tempstr1='arm32') or
+         (tempstr1='aarch32') then
+          begin
+           Result.OutputArchitecture:=elf_machine_arm; Result.OutputBits:=32;
+          end
+         else if(tempstr1='arm64') or (tempstr1='aarch64') then
+          begin
+           Result.OutputArchitecture:=elf_machine_aarch64; Result.OutputBits:=64;
+          end
+         else if(tempstr1='riscv32') or (tempstr1='rv32') then
+          begin
+           Result.OutputArchitecture:=elf_machine_riscv; Result.OutputBits:=32;
+          end
+         else if(tempstr1='riscv64') or (tempstr1='rv64') then
+          begin
+           Result.OutputArchitecture:=elf_machine_riscv; Result.OutputBits:=64;
+          end
+         else if(tempstr1='loongarch32') or (tempstr1='la32') then
+          begin
+           Result.OutputArchitecture:=elf_machine_loongarch; Result.OutputBits:=32;
+          end
+         else if(tempstr1='loongarch64') or (tempstr1='la64') then
+          begin
+           Result.OutputArchitecture:=elf_machine_loongarch; Result.OutputBits:=64;
+          end
+         else
+          begin
+           writeln('ERROR:Unsupported Architecture '+tempstr1);
+           readln;
+           halt;
+          end;
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:input Architecture must be '+
+         'input_architecture/inputarchitecture/input_arch/inputarch(Architecture).');
          readln;
          halt;
         end;
@@ -1203,11 +1369,11 @@ begin
          if(length(tempstr1)>=2) then
           begin
            if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-           Result.OutputFormat:=Copy(tempstr1,2,length(tempstr1)-2)
+           Result.OutputFileName:=Copy(tempstr1,2,length(tempstr1)-2)
            else
-           Result.OutputFormat:=tempstr1;
+           Result.OutputFileName:=tempstr1;
           end
-         else Result.OutputFormat:=tempstr1;
+         else Result.OutputFileName:=tempstr1;
         end
        else
         begin
@@ -1301,25 +1467,24 @@ begin
         begin
          writeln('ERROR in Column '+IntToStr(i)+' ,Row 1');
          writeln('ERROR:Input FileName must be input_file_path/input_filepath/input_path/inputpath/'
-         +'inputfilepath().');
+         +'inputfilepath(paths to the file).');
          readln;
          halt;
         end;
       end
-     else if(LowerCase(LineList.Line[i-1].Item[0])='inputfilepath_withsub')
-     or(LowerCase(LineList.Line[i-1].Item[0])='inputpath_withsub')
+     else if(LowerCase(LineList.Line[i-1].Item[0])='inputpath_withsub')
      or(LowerCase(LineList.Line[i-1].Item[0])='input_path_withsub')
+     or(LowerCase(LineList.Line[i-1].Item[0])='inputpathwithsub')
+     or(LowerCase(LineList.Line[i-1].Item[0])='input_pathwithsub')
+     or(LowerCase(LineList.Line[i-1].Item[0])='inputfilepath_withsub')
      or(LowerCase(LineList.Line[i-1].Item[0])='input_file_path_withsub')
      or(LowerCase(LineList.Line[i-1].Item[0])='input_filepath_withsub')
      or(LowerCase(LineList.Line[i-1].Item[0])='inputfilepathwithsub')
-     or(LowerCase(LineList.Line[i-1].Item[0])='inputpathwithsub')
-     or(LowerCase(LineList.Line[i-1].Item[0])='input_pathwithsub')
      or(LowerCase(LineList.Line[i-1].Item[0])='input_file_pathwithsub')
      or(LowerCase(LineList.Line[i-1].Item[0])='input_filepathwithsub') then
       begin
        if(LineList.LineCount>=4) then
         begin
-         j:=3;
          j:=3; k:=4;
          while(j<=LineList.Line[i-1].Count)do
           begin
@@ -1346,21 +1511,24 @@ begin
        else if(LineList.Line[i-1].Count=3) then
         begin
          writeln('ERROR in Column '+IntToStr(i)+' ,Row 1');
-         writeln('ERROR:Input File Path must not be empty.');
+         writeln('ERROR:Input File Path With Sub Directory must not be empty.');
          readln;
          halt;
         end
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+' ,Row 1');
-         writeln('ERROR:Input FileName must be input_file_path/input_filepath/input_path/inputpath/'
-         +'inputfilepath().');
+         writeln('ERROR:Input FileName must be inputfilepath_withsub/inputpath_withsub/'+
+         'input_path_withsub/input_file_path_withsub/input_filepath_withsub/'+
+         'inputfilepathwithsub/inputpathwithsub/input_pathwithsub/input_file_pathwithsub'+
+         'input_filepathwithsub(File Paths which contains object files).');
          readln;
          halt;
         end;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='section') or
-     (LowerCase(LineList.Line[i-1].Item[0])='sect') then
+     (LowerCase(LineList.Line[i-1].Item[0])='sect') or
+     (LowerCase(LineList.Line[i-1].Item[0])='sec') then
       begin
        j:=3;
        inc(Result.SectionCount);
@@ -1380,7 +1548,8 @@ begin
           end;
          if(k-j>2) then
           begin
-           if(LowerCase(LineList.Line[i-1].Item[j-1])='address') and
+           if((LowerCase(LineList.Line[i-1].Item[j-1])='address') or
+           (LowerCase(LineList.Line[i-1].Item[j-1])='addr')) and
            (LineList.Line[i-1].Item[j]='=') then
             begin
              tempstr1:=LineList.Line[i-1].Item[j+1];
@@ -1392,7 +1561,7 @@ begin
             begin
              tempstr1:=LineList.Line[i-1].Item[j+1];
              Result.Section[Result.SectionCount-1].SectionAlign:=unild_script_str_to_int(tempstr1);
-            end
+            end;
           end
          else
           begin
@@ -1403,7 +1572,7 @@ begin
            or(tempstr1='.dynsym')or(tempstr1='.dynstr')or(tempstr1='.got')or(tempstr1='.got.plt')
            or(Copy(tempstr1,1,5)='.rela')or(Copy(tempstr1,1,4)='.rel') or (Copy(tempstr1,1,5)='.relr')) then
             begin
-             writeln('ERROR in Column '+IntToStr(i)+',Row '+IntToStr(LineList.Line[i-1].Offset[j])+':');
+             writeln('ERROR in Column '+IntToStr(i)+',Row '+IntToStr(LineList.Line[i-1].Offset[j-1])+':');
              writeln('Section Name '+tempstr1+' is a special section,cannot be specified in Linker Script.');
              readln;
              halt;
@@ -1424,7 +1593,7 @@ begin
              setLength(Result.Section[Result.SectionCount-1].SectionAttribute,
              Result.Section[Result.SectionCount-1].SectionAttributeCount);
              Result.Section[Result.SectionCount-1].SectionAttribute[
-             Result.Section[Result.SectionCount-1].SectionAttributeCount-1]:=tempstr1;
+             Result.Section[Result.SectionCount-1].SectionAttributeCount-1]:=LowerCase(tempstr1);
             end;
           end;
          if(LineList.Line[i-1].Item[k-1]=')') then break;
@@ -1468,16 +1637,50 @@ begin
            Result.Section[Result.SectionCount-1].SectionItemCount);
            Result.Section[Result.SectionCount-1].SectionItem[
            Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemCount:=0;
-           if(LowerCase(tempstr1)='offset') then
+           if(LowerCase(tempstr1)='offset') or (LowerCase(tempstr1)='absoluteoffset')
+           or(LowerCase(tempstr1)='absoffset') then
             begin
+             if(LineList.Line[j-1].Count>4) then
+              begin
+               writeln('ERROR in Column '+IntToStr(j)+' ,Row 1');
+               writeln('ERROR:Section Offset (Offset/absoluteOffset/absoffset(Value))'+
+               'should be only one parameter.');
+               readln;
+               halt;
+              end;
              Result.Section[Result.SectionCount-1].SectionItem[
              Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemClass:=unild_item_offset;
              Result.Section[Result.SectionCount-1].SectionItem[
              Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemOffset:=
              unild_script_str_to_int(LineList.Line[j-1].Item[2]);
             end
-           else if(LowerCase(tempstr1)='align') then
+           else if(LowerCase(tempstr1)='reloffset') or (LowerCase(tempstr1)='relativeoffset') then
             begin
+             if(LineList.Line[j-1].Count>4) then
+              begin
+               writeln('ERROR in Column '+IntToStr(j)+' ,Row 1');
+               writeln('ERROR:Section RelativeOffset (RelOffset/RelativeOffset(Value))'
+               +'should be only one parameter.');
+               readln;
+               halt;
+              end;
+             Result.Section[Result.SectionCount-1].SectionItem[
+             Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemClass:=
+             unild_item_relativeoffset;
+             Result.Section[Result.SectionCount-1].SectionItem[
+             Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemRelativeOffset:=
+             unild_script_str_to_int(LineList.Line[j-1].Item[2]);
+            end
+           else if(LowerCase(tempstr1)='align') or (LowerCase(tempstr1)='internalalign') then
+            begin
+             if(LineList.Line[j-1].Count>4) then
+              begin
+               writeln('ERROR in Column '+IntToStr(j)+' ,Row 1');
+               writeln('ERROR:Section Internal Align (align/internalalign(Value))'
+               +'should be only one parameter.');
+               readln;
+               halt;
+              end;
              Result.Section[Result.SectionCount-1].SectionItem[
              Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemClass:=unild_item_align;
              Result.Section[Result.SectionCount-1].SectionItem[
