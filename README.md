@@ -3,7 +3,14 @@ Universal Linker Editor(Universal Linker eDitor)
 ## Requirements of the unild to execute
 Windows or Linux Operating System
 ## Requirements of compling unild 
-FPC(Free Pascal Compiler)  
+FPC(Free Pascal Compiler) Trunk Version
+You ought to install the fpc old version using Package Manager in the Linux,and git clone the fpc source code in gitlab(Search gitlab fpc).  
+After you obtain the source code of the fpc,you ought to type these commands and execute below:
+sudo make all  
+cd compiler  
+sudo make alltargets  
+cd ..  
+sudo make all CPU_TARGET=(The Architecture you needed) OS_TARGET=linux BINUTILSPREFIX=(Architecture of you needed)-linux-gnu- (For Cross Compiling,if you not want to cross compile,You ought to ignore this command in Linux)  
 Please run build.sh in the source code to quickly compile the source code to executable file.   
 Default Compiler Path is in Linux(/home/(your user name)/source/compiler),you can edit the build.sh to change the default compiler path.  
 If you want to cross compile the unild software,you should bash build.sh (Architecture) to cross compile the linker.  
