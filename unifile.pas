@@ -114,6 +114,7 @@ type unifile_elf_object_file_symbol_table=packed record
                                     SectionType:array of SizeUint;
                                     SectionFlag:array of SizeUint;
                                     SectionUsed:array of boolean;
+                                    SectionAlign:array of dword;
                                     SectionName:array of string;
                                     SectionNameHash:array of SizeUint;
                                     SectionContent:array of Pointer;
@@ -156,14 +157,18 @@ type unifile_elf_object_file_symbol_table=packed record
                                     AdjustRiscVType:array of byte;
                                     Count:SizeInt;
                                     end;
+     unifile_linked_file_content_info=packed record
+                                      ContentStartIndex:SizeUInt;
+                                      ContentCount:SizeUint;
+                                      ContentSize:SizeUint;
+                                      end;
      unifile_linked_file_content=packed record
-                                 ContentName:array of string;
-                                 ContentNameHash:array of SizeUint;
-                                 Content:array of Pointer;
-                                 ContentSize:array of SizeUint;
-                                 ContentOffset:array of SizeInt;
-                                 ContentSizeGot:array of boolean;
-                                 Count:SizeUInt;
+                                 Index:SizeUint;
+                                 Offset:SizeUint;
+                                 Name:string;
+                                 NameHash:SizeUInt;
+                                 Memory:Pointer;
+                                 Size:SizeUint;
                                  end;
      unifile_linked_file_symbol_table=packed record
                                       SymbolSectionName:array of string;
@@ -186,10 +191,10 @@ type unifile_elf_object_file_symbol_table=packed record
                                SectionName:array of string;
                                SectionNameHash:array of SizeUint;
                                SectionAttribute:array of byte;
+                               SectionContentInfo:array of unifile_linked_file_content_info;
                                SectionContent:array of unifile_linked_file_content;
-                               SectionContentAssist:array of unifile_temporary_hash_table;
+                               SectionContentAssist:unifile_temporary_hash_table;
                                SectionVaild:array of boolean;
-                               SectionSize:array of SizeUint;
                                SectionAlign:array of SizeUint;
                                SectionAddress:array of SizeUint;
                                {For Adjust Table}
@@ -213,6 +218,8 @@ type unifile_elf_object_file_symbol_table=packed record
                                {For Files}
                                FileName:array of string;
                                FileNameCount:SizeUint;
+                               {For External Needs}
+                               ExternalNeeded:boolean;
                                end;
      unifile_file_symbol_table=packed record
                                SymbolSectionIndex:array of word;
@@ -225,14 +232,6 @@ type unifile_elf_object_file_symbol_table=packed record
                                SymbolValue:array of SizeUint;
                                SymbolCount:SizeUint;
                                end;
-     unifile_file_relocation_table=packed record
-                                   RelocationBaseHash:array of SizeUint;
-                                   RelocationSymbolHash:array of SizeUint;
-                                   RelocationOffset:array of SizeInt;
-                                   RelocationType:array of dword;
-                                   RelocationAddend:array of SizeInt;
-                                   RelocationCount:SizeUint;
-                                   end;
      unifile_file_list=packed record
                        GotCountOriginal:SizeUint;
                        GotHashList:array of SizeUint;
@@ -243,12 +242,22 @@ type unifile_elf_object_file_symbol_table=packed record
                        GotHashTable:unifile_temporary_hash_table;
                        GotHashEnable:array of boolean;
                        end;
+     unifile_check_result=packed record
+                          GotBool:boolean;
+                          NeedRelocationBits:byte;
+                          end;
+     unifile_check_needed_list=packed record
+                               NeedAddress:array of SizeUint;
+                               NeedBits:array of byte;
+                               NeedCount:SizeUint;
+                               end;
      unifile_result=packed record
                     GotType:byte;
                     AdjustValue:SizeInt;
                     SpecialBool:boolean;
                     RiscvType:byte;
                     Bits:byte;
+                    ConvertToRelocationBits:byte;
                     end;
      unifile_file_hash_table=packed record
                              BucketCount:dword;
@@ -299,8 +308,6 @@ type unifile_elf_object_file_symbol_table=packed record
                         SectionOffset:array of SizeUint;
                         SectionAddress:array of SizeUint;
                         SectionCount:SizeUInt;
-                        {For Relocation Table}
-                        RelocationTable:unifile_file_relocation_table;
                         {For Entry Address}
                         EntryAddress:SizeUint;
                         {For Symbol Table}
@@ -312,7 +319,6 @@ type unifile_elf_object_file_symbol_table=packed record
                         DynamicSymbolTable:unifile_file_symbol_table;
                         DynamicSymbolTableAssist:unifile_temporary_hash_table;
                         DynamicSymbolTableNewIndex:unifile_index_list;
-                        DynamicSymbolTableLocalCount:SizeUint;
                         {For File List}
                         GotTableList:unifile_file_list;
                         {For Section Fast Index}
@@ -346,13 +352,21 @@ type unifile_elf_object_file_symbol_table=packed record
                         CoffList:array of unifile_file_coff_relocation_list;
                         CoffListCount:dword;
                         CoffListSpecialize:boolean;
+                        {For Executable Base Address}
+                        BaseAddress:SizeUint;
                         end;
      unifile_file_list_settings=packed record
                                 FileName:array of string;
                                 FileCount:SizeUint;
                                 end;
+     unifile_file_remember=packed record
+                           TypeItem:array of word;
+                           TypeItemCount:array of SizeUint;
+                           TypeCount:SizeUint;
+                           end;
 
 var unifile_fileList:unifile_file_list_settings;
+
 
       {For Bits Constant}
 const unifile_bit_32=32;
@@ -410,6 +424,10 @@ implementation
 procedure unifile_filelist_initialize;
 begin
  unifile_filelist.FileCount:=0;
+end;
+function unifile_hash_table_bucket_count(SearchCount:SizeUint):SizeUInt;
+begin
+ Result:=SearchCount*9 div 5;
 end;
 function unifile_lsb_to_msb(lsbdata:word):word;
 begin
@@ -819,6 +837,7 @@ begin
     end;
    Result.SymbolCount:=i;
   end;
+ FreeMem(SharedContent);
 end;
 procedure unifile_add_elf_dynamic_library_to_total(var TotalLibrary:unifile_elf_dynamic_library_total;
 SubDynamicLibrary:unifile_elf_dynamic_library);
@@ -1226,6 +1245,9 @@ var fs:TFileStream;
     StrTabIndex:word;
     StrTabPointer:PChar;
     SymbolCount:SizeUInt;
+    {For Section Symbols}
+    SectionIndex:word;
+    SectionPointerForSymbol:Pointer;
 begin
  {Read the elf object file in disk}
  if(not FileExists(fn)) then
@@ -1345,6 +1367,14 @@ begin
          Result.SymbolTable.SymbolVisibility[j]:=
          Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_other;
+         if(Result.SymbolTable.SymbolType[j]=elf_symbol_type_section) then
+          begin
+           SectionIndex:=Result.SymbolTable.SymbolSectionIndex[j];
+           SectionPointerForSymbol:=OriginalContent+SectionOffset+
+           SectionIndex*sizeof(elf32_section_header);
+           Result.SymbolTable.SymbolName[j]:=
+           PChar(StringTablePointer+Pelf32_section_header(SectionPointerForSymbol)^.section_header_name);
+          end;
         end;
       end;
      if(Pelf32_section_header(SectionPointer)^.section_header_type=elf_section_type_rela)
@@ -1428,6 +1458,14 @@ begin
          Result.SymbolTable.SymbolVisibility[j]:=
          Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_other;
+         if(Result.SymbolTable.SymbolType[j]=elf_symbol_type_section) then
+          begin
+           SectionIndex:=Result.SymbolTable.SymbolSectionIndex[j];
+           SectionPointerForSymbol:=OriginalContent+SectionOffset+
+           SectionIndex*sizeof(elf64_section_header);
+           Result.SymbolTable.SymbolName[j]:=
+           PChar(StringTablePointer+Pelf64_section_header(SectionPointerForSymbol)^.section_header_name);
+          end;
         end;
       end;
      if(Pelf64_section_header(SectionPointer)^.section_header_type=elf_section_type_rela)
@@ -1462,6 +1500,9 @@ var OriginalContent:Pointer;
     StrTabIndex:word;
     StrTabPointer:PChar;
     SymbolCount:SizeUInt;
+    {For Section Symbols}
+    SectionIndex:word;
+    SectionPointerForSymbol:Pointer;
 begin
  OriginalContent:=Ptr;
  {Then Check the elf file}
@@ -1566,6 +1607,14 @@ begin
          Result.SymbolTable.SymbolVisibility[j]:=
          Pelf32_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf32_symbol_table_entry))^.symbol_other;
+         if(Result.SymbolTable.SymbolType[j]=elf_symbol_type_section) then
+          begin
+           SectionIndex:=Result.SymbolTable.SymbolSectionIndex[j];
+           SectionPointerForSymbol:=OriginalContent+SectionOffset+
+           SectionIndex*sizeof(elf32_section_header);
+           Result.SymbolTable.SymbolName[j]:=
+           PChar(StringTablePointer+Pelf32_section_header(SectionPointerForSymbol)^.section_header_name);
+          end;
         end;
       end;
      if(Pelf32_section_header(SectionPointer)^.section_header_type=elf_section_type_rela)
@@ -1646,6 +1695,14 @@ begin
          Result.SymbolTable.SymbolVisibility[j]:=
          Pelf64_symbol_table_entry(SectionDataPointer+
          j*sizeof(elf64_symbol_table_entry))^.symbol_other;
+         if(Result.SymbolTable.SymbolType[j]=elf_symbol_type_section) then
+          begin
+           SectionIndex:=Result.SymbolTable.SymbolSectionIndex[j];
+           SectionPointerForSymbol:=OriginalContent+SectionOffset+
+           SectionIndex*sizeof(elf64_section_header);
+           Result.SymbolTable.SymbolName[j]:=
+           PChar(StringTablePointer+Pelf64_section_header(SectionPointerForSymbol)^.section_header_name);
+          end;
         end;
       end;
      if(Pelf64_section_header(SectionPointer)^.section_header_type=elf_section_type_rela)
@@ -1820,17 +1877,14 @@ begin
 end;
 function unifile_parse(var totalfile:unifile_elf_object_file_total):unifile_elf_object_file_parsed;
 var i,j,k,m:SizeUInt;
-    {For Relative Start point}
-    StartPoint:SizeUint;
     {For Relative or Relocation}
     ContentPointer:Pointer;
     ContentSize:SizeUint;
     {For Temporary Strings}
     tempstr:string;
 begin
- i:=1; j:=1; k:=1; m:=0; Result.SectionCount:=0; Result.Bits:=0;
- Result.SectionRelocationCount:=0;
- Result.SectionSymbolTable.SymbolCount:=0; StartPoint:=0;
+ i:=1; j:=1; k:=0; m:=0; Result.SectionCount:=0; Result.Bits:=0;
+ Result.SectionRelocationCount:=0; Result.SectionSymbolTable.SymbolCount:=0;
  Result.FileFlag:=0;
  {Initialize the Parsed file Information}
  SetLength(Result.SectionSymbolTable.SymbolName,totalfile.ObjectSymbolCount);
@@ -1843,6 +1897,7 @@ begin
  SetLength(Result.SectionSymbolTable.SymbolVisibility,totalfile.ObjectSymbolCount);
  SetLength(Result.SectionSymbolTable.SymbolSize,totalfile.ObjectSymbolCount);
  SetLength(Result.SectionName,totalfile.ObjectSectionCount);
+ SetLength(Result.SectionAlign,totalfile.ObjectSectionCount);
  SetLength(Result.SectionNameHash,totalfile.ObjectSectionCount);
  SetLength(Result.SectionFlag,totalfile.ObjectSectionCount);
  SetLength(Result.SectionType,totalfile.ObjectSectionCount);
@@ -1856,16 +1911,16 @@ begin
    Result.FileFlag:=Result.FileFlag or totalfile.Objects[i-1].FileFlag;
    if(totalfile.Objects[i-1].Bits>Result.Bits) then Result.Bits:=totalfile.Objects[i-1].Bits;
    Result.Architecture:=totalfile.Objects[i-1].Architecture;
-   StartPoint:=Result.SectionSymbolTable.SymbolCount;
-   inc(Result.SectionSymbolTable.SymbolCount,totalfile.Objects[i-1].SymbolTable.SymbolCount);
-   j:=2; k:=1;
+   j:=2;
    while(j<=totalfile.Objects[i-1].SymbolTable.SymbolCount)do
     begin
      if(totalfile.Objects[i-1].SymbolTable.SymbolName[j-1]='')then
       begin
        inc(j); continue;
       end;
+     inc(m);
      tempstr:=totalfile.Objects[i-1].SymbolTable.SymbolName[j-1];
+     Result.SectionSymbolTable.SymbolName[m-1]:=tempstr;
      if(length(tempstr)>1) and (tempstr[1]='.') then
       begin
        if(totalfile.Objects[i-1].SymbolTable.SymbolType[j-1]=elf_symbol_type_no_type) then
@@ -1877,31 +1932,29 @@ begin
          tempstr:=tempstr+unifile_generate_index(i-1,0);
         end;
       end;
-     Result.SectionSymbolTable.SymbolName[StartPoint+k-1]:=tempstr;
-     Result.SectionSymbolTable.SymbolNameHash[StartPoint+k-1]:=unihash_generate_value(tempstr,false);
+     Result.SectionSymbolTable.SymbolNameHash[m-1]:=unihash_generate_value(tempstr,false);
+     tempstr:='';
      if(totalfile.Objects[i-1].SymbolTable.SymbolSectionIndex[j-1]<>0)
      and(totalfile.Objects[i-1].SymbolTable.SymbolSectionIndex[j-1]<
      totalfile.Objects[i-1].SectionCount) then
       begin
-       Result.SectionSymbolTable.SymbolSectionName[StartPoint+k-1]:=
-       totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SymbolTable.SymbolSectionIndex[j-1]]
-       +unifile_generate_index(i-1,0);
-       Result.SectionSymbolTable.SymbolSectionNameHash[StartPoint+k-1]:=
-       unihash_generate_value(Result.SectionSymbolTable.SymbolSectionName[StartPoint+k-1],true);
+       tempstr:=
+       totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SymbolTable.SymbolSectionIndex[j-1]];
+       Result.SectionSymbolTable.SymbolSectionName[m-1]:=tempstr;
+       tempstr:=Result.SectionSymbolTable.SymbolSectionName[m-1]+
+       unifile_generate_index(i-1,0);
+       Result.SectionSymbolTable.SymbolSectionNameHash[m-1]:=
+       unihash_generate_value(tempstr,true);
       end;
-     Result.SectionSymbolTable.SymbolType[StartPoint+k-1]:=
-     totalfile.Objects[i-1].SymbolTable.SymbolType[j-1];
-     Result.SectionSymbolTable.SymbolSize[StartPoint+k-1]:=
-     totalfile.Objects[i-1].SymbolTable.SymbolSize[j-1];
-     Result.SectionSymbolTable.SymbolValue[StartPoint+k-1]:=
-     totalfile.Objects[i-1].SymbolTable.SymbolValue[j-1];
-     Result.SectionSymbolTable.SymbolVisibility[StartPoint+k-1]:=
+     Result.SectionSymbolTable.SymbolType[m-1]:=totalfile.Objects[i-1].SymbolTable.SymbolType[j-1];
+     Result.SectionSymbolTable.SymbolSize[m-1]:=totalfile.Objects[i-1].SymbolTable.SymbolSize[j-1];
+     Result.SectionSymbolTable.SymbolValue[m-1]:=totalfile.Objects[i-1].SymbolTable.SymbolValue[j-1];
+     Result.SectionSymbolTable.SymbolVisibility[m-1]:=
      totalfile.Objects[i-1].SymbolTable.SymbolVisibility[j-1];
-     inc(k); inc(j);
+     inc(j);
     end;
-   inc(StartPoint,k-1);
-   Result.SectionSymbolTable.SymbolCount:=StartPoint;
-   j:=1; inc(m,totalfile.Objects[i-1].SectionCount);
+   j:=1;
+   tempstr:='';
    while(j<=totalfile.Objects[i-1].SectionCount)do
     begin
      ContentPointer:=totalfile.Objects[i-1].SectionContent[j-1];
@@ -1911,12 +1964,11 @@ begin
        inc(Result.SectionRelocationCount);
        if(Result.Bits=32) then
         begin
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=
-         totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]]
-         +unifile_generate_index(i-1,0);
+         tempstr:=totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]];
+         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
+         tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection,true);
+         unihash_generate_value(tempstr,true);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 12;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 12);
@@ -1942,6 +1994,7 @@ begin
             begin
              tempstr:=totalfile.Objects[i-1].SymbolTable.SymbolName[
              elf32_reloc_symbol(Pelf32_rela(ContentPointer+(k-1)*12)^.Info)];
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
              if(length(tempstr)>1) and (tempstr[1]='.') then
               begin
                if(totalfile.Objects[i-1].SymbolTable.SymbolType[
@@ -1953,7 +2006,6 @@ begin
                tempstr:=tempstr+unifile_generate_index(i-1,0);
               end;
             end;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
            unihash_generate_value(tempstr,false);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
@@ -1962,12 +2014,11 @@ begin
         end
        else
         begin
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=
-         totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]]+
-         unifile_generate_index(i-1,0);
+         tempstr:=totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]];
+         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
+         tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection,true);
+         unihash_generate_value(tempstr,true);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 24;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 24);
@@ -1993,6 +2044,7 @@ begin
             begin
              tempstr:=totalfile.Objects[i-1].SymbolTable.SymbolName[
              elf64_reloc_symbol(Pelf64_rela(ContentPointer+(k-1)*24)^.Info)];
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
              if(length(tempstr)>1) and (tempstr[1]='.') then
               begin
                if(totalfile.Objects[i-1].SymbolTable.SymbolType[
@@ -2002,11 +2054,9 @@ begin
                  tempstr:=tempstr+unifile_generate_index(i-1,
                  elf64_reloc_symbol(Pelf64_rela(ContentPointer+(k-1)*24)^.Info),true);
                 end
-               else
-               tempstr:=tempstr+unifile_generate_index(i-1,0);
+               else tempstr:=tempstr+unifile_generate_index(i-1,0);
               end;
             end;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
            unihash_generate_value(tempstr,false);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
@@ -2022,12 +2072,11 @@ begin
        inc(Result.SectionRelocationCount);
        if(Result.Bits=32) then
         begin
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=
-         totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]]+
-         unifile_generate_index(i-1,0);
+         tempstr:=totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]];
+         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
+         tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection,true);
+         unihash_generate_value(tempstr,true);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 8;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 8);
@@ -2052,6 +2101,7 @@ begin
             begin
              tempstr:=totalfile.Objects[i-1].SymbolTable.SymbolName[
              elf32_reloc_symbol(Pelf32_rel(ContentPointer+(k-1)*8)^.Info)];
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
              if(length(tempstr)>1) and (tempstr[1]='.') then
               begin
                if(totalfile.Objects[i-1].SymbolTable.SymbolType[
@@ -2063,7 +2113,6 @@ begin
                tempstr:=tempstr+unifile_generate_index(i-1,0);
               end;
             end;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
            unihash_generate_value(tempstr,false);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
@@ -2072,12 +2121,11 @@ begin
         end
        else
         begin
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=
-         totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]]+
-         unifile_generate_index(i-1,0);
+         tempstr:=totalfile.Objects[i-1].SectionName[totalfile.Objects[i-1].SectionInfo[j-1]];
+         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
+         tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(
-         Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection,false);
+         unihash_generate_value(tempstr,true);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 16;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 16);
@@ -2102,6 +2150,7 @@ begin
             begin
              tempstr:=totalfile.Objects[i-1].SymbolTable.SymbolName[
              elf64_reloc_symbol(Pelf64_rel(ContentPointer+(k-1)*16)^.Info)];
+             Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
              if(length(tempstr)>1) and (tempstr[1]='.') then
               begin
                if(totalfile.Objects[i-1].SymbolTable.SymbolType[
@@ -2113,7 +2162,6 @@ begin
                tempstr:=tempstr+unifile_generate_index(i-1,0);
               end;
             end;
-           Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbol[k-1]:=tempstr;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
            unihash_generate_value(tempstr,false);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
@@ -2134,22 +2182,23 @@ begin
      else if(totalfile.Objects[i-1].SectionType[j-1]<>elf_section_type_null) then
       begin
        inc(Result.SectionCount);
-       Result.SectionName[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionName[j-1]
-       +unifile_generate_index(i-1,0);
+       tempstr:=totalfile.Objects[i-1].SectionName[j-1];
+       Result.SectionName[Result.SectionCount-1]:=tempstr;
+       tempstr:=tempstr+unifile_generate_index(i-1,0);
+       Result.SectionNameHash[Result.SectionCount-1]:=unihash_generate_value(tempstr,true);
        Result.SectionFlag[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionFlag[j-1];
        Result.SectionType[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionType[j-1];
-       Result.SectionNameHash[Result.SectionCount-1]:=
-       unihash_generate_value(Result.SectionName[Result.SectionCount-1],true);
        Result.SectionSize[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionSize[j-1];
-       Result.SectionUsed[Result.SectionCount-1]:=false;
+       Result.SectionAlign[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionAlign[j-1];
+       tempstr:='';
        if(totalfile.Objects[i-1].SectionType[j-1]<>elf_section_type_nobit) then
        Result.SectionContent[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionContent[j-1];
       end;
      inc(j);
     end;
-   m:=Result.SectionCount;
    inc(i);
   end;
+ Result.SectionSymbolTable.SymbolCount:=m;
 end;
 function unifile_search_for_hash_table(HashTable:unifile_temporary_hash_table;
 HashGoal:SizeUint):SizeUint;
@@ -2265,6 +2314,7 @@ var i,j,k,m,n,a,b,c,d,e,f,g,h:SizeInt;
     tempstr:string;
     {For Not in File Sections}
     NotInFileBool:boolean;
+    NoAttribute:boolean;
     {For Hash Table to the basefile}
     SectionHash,RelocationHash,SymbolHash:unifile_temporary_hash_table;
     SymbolClear:array of Byte;
@@ -2273,6 +2323,7 @@ var i,j,k,m,n,a,b,c,d,e,f,g,h:SizeInt;
     {For Entry Hash}
     EntryHash:SizeUint;
     EntryIndex:byte=1;
+    EntrySectionEstimatedIndex:SizeUint;
     {For Hash Table of the Vaild Section}
     AdjustHashTable:unifile_temporary_hash_table;
     AdjustVaildIndex:array of SizeUint;
@@ -2280,17 +2331,21 @@ var i,j,k,m,n,a,b,c,d,e,f,g,h:SizeInt;
     {For Checking the Vaild Symbols}
     VaildList:unifile_index_list;
     VaildLen,VaildLenInVaild,VaildLenVaild:SizeUInt;
+    {For Section Content Pointer}
+    ContentPointer:SizeUint;
+    ContentStartIndex:SizeUint;
+    ContentCount:SizeUint;
 Label JumpToAutoSection;
 begin
  {Initialize the First Stage}
- Result.Architecture:=basefile.Architecture;
+ Result.Architecture:=basefile.Architecture; Result.ExternalNeeded:=false;
  Result.Bits:=basefile.Bits; Result.FileNameCount:=0;
  {Generate the Vaild Table}
  SectionVaild.ItemCount:=basefile.SectionCount;
  SetLength(SectionVaild.Enable,SectionVaild.ItemCount);
  {Generate the Section Hash Table for the base file}
  i:=1;
- SectionHash.BucketCount:=basefile.SectionCount div 7*8;
+ SectionHash.BucketCount:=unifile_hash_table_bucket_count(basefile.SectionCount);
  SetLength(SectionHash.BucketItem,SectionHash.BucketCount+1);
  SetLength(SectionHash.BucketEnable,SectionHash.BucketCount+1);
  SetLength(SectionHash.BucketHash,SectionHash.BucketCount+1);
@@ -2323,7 +2378,7 @@ begin
   end;
  {Generate the Symbol Hash Table for the base file}
  i:=1;
- SymbolHash.BucketCount:=basefile.SectionSymbolTable.SymbolCount div 7*8;
+ SymbolHash.BucketCount:=unifile_hash_table_bucket_count(basefile.SectionSymbolTable.SymbolCount);
  SetLength(SymbolHash.BucketItem,SymbolHash.BucketCount+1);
  SetLength(SymbolHash.BucketEnable,SymbolHash.BucketCount+1);
  SetLength(SymbolHash.BucketHash,SymbolHash.BucketCount+1);
@@ -2351,11 +2406,6 @@ begin
       end;
      SymbolClear[i-1]:=1;
      inc(i); continue;
-    end
-   else if(basefile.SectionSymbolTable.SymbolType[i-1]=elf_symbol_type_section) then
-    begin
-     SymbolClear[i-1]:=1;
-     inc(i); continue;
     end;
    k:=basefile.SectionSymbolTable.SymbolNameHash[i-1] mod SymbolHash.BucketCount+1;
    if(SymbolHash.BucketEnable[k]=false) then
@@ -2376,7 +2426,7 @@ begin
   end;
  {Generate the Relocation Hash Table for the base file}
  i:=1;
- RelocationHash.BucketCount:=basefile.SectionRelocationCount div 7*8;
+ RelocationHash.BucketCount:=unifile_hash_table_bucket_count(basefile.SectionRelocationCount);
  SetLength(RelocationHash.BucketItem,RelocationHash.BucketCount+1);
  SetLength(RelocationHash.BucketEnable,RelocationHash.BucketCount+1);
  SetLength(RelocationHash.BucketHash,RelocationHash.BucketCount+1);
@@ -2423,6 +2473,31 @@ begin
  Result.EntrySection:=basefile.SectionSymbolTable.SymbolSectionName[c-1];
  Result.EntrySectionHash:=basefile.SectionSymbolTable.SymbolSectionNameHash[c-1];
  Result.EntrySectionIndex:=0; c:=0;
+ {If EntryAsStartSection Needs,Find the Real Section Index of the linker-generated section.}
+ if(basescript.EntryAsStartOfSection) then
+  begin
+   while(i<=basescript.SectionCount)do
+    begin
+     j:=1;
+     while(j<=basescript.Section[i-1].SectionItemCount)do
+      begin
+       if(basescript.Section[i-1].SectionItem[j-1].ItemClass=unild_item_filter) then
+        begin
+         while(k<=basescript.Section[i-1].SectionItem[j-1].ItemCount)do
+          begin
+           if(unild_script_match_mask(Result.EntrySection,
+           basescript.Section[i-1].SectionItem[j-1].ItemFilter[k-1])) then break;
+           inc(k);
+          end;
+         if(k<=basescript.Section[i-1].SectionItem[j-1].ItemCount) then break;
+        end;
+       inc(j);
+      end;
+     if(j<=basescript.Section[i-1].SectionItemCount) then break;
+     inc(i);
+    end;
+   EntrySectionEstimatedIndex:=i;
+  end;
  {Then Generate the First stage file}
  Result.Architecture:=basefile.Architecture; Result.Bits:=basefile.Bits;
  Result.SectionCount:=basescript.SectionCount;
@@ -2430,19 +2505,17 @@ begin
  SetLength(Result.SectionNameHash,basescript.SectionCount);
  SetLength(Result.SectionVaild,basescript.SectionCount);
  SetLength(Result.SectionAddress,basescript.SectionCount);
- SetLength(Result.SectionSize,basescript.SectionCount);
  SetLength(Result.SectionAlign,basescript.SectionCount);
  SetLength(Result.SectionAttribute,basescript.SectionCount);
- SetLength(Result.SectionContent,basescript.SectionCount);
- SetLength(Result.SectionContentAssist,basescript.SectionCount);
- i:=1;
+ SetLength(Result.SectionContentInfo,basescript.SectionCount);
+ SetLength(Result.SectionContent,basefile.SectionCount);
+ i:=1; ContentPointer:=0;
  while(i<=basescript.SectionCount)do
   begin
    InternalOffsetAlternative:=0;
    Result.SectionName[i-1]:=basescript.Section[i-1].SectionName;
    Result.SectionNameHash[i-1]:=unihash_generate_value(Result.SectionName[i-1],true);
-   InternalOffsetAlterNative:=0;
-   j:=1; AttributeData:=0; NotInFileBool:=false;
+   InternalOffsetAlterNative:=0; j:=1; AttributeData:=0; NoAttribute:=false;
    while(j<=basescript.Section[i-1].SectionAttributeCount)do
     begin
      tempstr:=basescript.Section[i-1].SectionAttribute[j-1];
@@ -2459,7 +2532,11 @@ begin
      else if(tempstr='tls') or(tempstr='threadlocalstorage')then
      AttributeData:=AttributeData or unifile_attribute_thread_local_storage
      else if(tempstr='note') or(tempstr='n')then
-     AttributeData:=AttributeData or unifile_attribute_note;
+     AttributeData:=AttributeData or unifile_attribute_note
+     else if(tempstr='noattribute') then
+      begin
+       AttributeData:=0; NoAttribute:=true; break;
+      end;
      inc(j);
     end;
    Result.SectionAddress[i-1]:=basescript.Section[i-1].SectionAddress;
@@ -2470,10 +2547,10 @@ begin
      if(Result.Bits=32) then Result.SectionAlign[i-1]:=4 else Result.SectionAlign[i-1]:=8;
     end;
    Result.SectionName[i-1]:=basescript.Section[i-1].SectionName;
-   Result.SectionSize[i-1]:=0;
-   Result.SectionContent[i-1].Count:=0;
    Result.SectionVaild[i-1]:=true;
-   k:=1; InternalOffset:=0;
+   Result.SectionContentInfo[i-1].ContentStartIndex:=ContentPointer+1;
+   ContentStartIndex:=ContentPointer+1;
+   NotInFileBool:=true; k:=1; InternalOffset:=0;
    while(k<=basescript.Section[i-1].SectionItemCount)do
     begin
      if(basescript.Section[i-1].SectionItem[k-1].ItemClass=unild_item_offset) then
@@ -2497,12 +2574,12 @@ begin
        j:=1; n:=1; m:=basescript.Section[i-1].SectionItem[k-1].ItemCount;
        while(n<=basefile.SectionCount)do
         begin
-         if(SmartLinking) and (basescript.Section[i-1].SectionItem[k-1].ItemKeep=false) and
-         (SectionVaild.Enable[n-1]=false) then
+         if(basefile.SectionUsed[n-1]) then
           begin
            inc(n); continue;
           end
-         else if(basefile.SectionSize[n-1]=0) or (basefile.SectionUsed[n-1]) then
+         else if(SmartLinking) and (basescript.Section[i-1].SectionItem[k-1].ItemKeep=false) and
+         (SectionVaild.Enable[n-1]=false) then
           begin
            inc(n); continue;
           end
@@ -2520,86 +2597,85 @@ begin
           end;
          if(j<=m) then
           begin
-           if(basefile.SectionFlag[i-1] or elf_section_flag_write=elf_section_flag_write) then
-           AttributeData:=AttributeData or unifile_attribute_write;
-           if(basefile.SectionFlag[i-1] or elf_section_flag_write=elf_section_flag_alloc) then
-           AttributeData:=AttributeData or unifile_attribute_alloc;
-           if(basefile.SectionFlag[i-1] or elf_section_flag_write=elf_section_flag_executable) then
-           AttributeData:=AttributeData or unifile_attribute_execute;
-           if(basefile.SectionFlag[i-1] or elf_section_flag_write=elf_section_flag_info_link) then
-           AttributeData:=AttributeData or unifile_attribute_information;
-           if(basefile.SectionContent[i-1]<>nil) and (NotInFileBool) then NotInFileBool:=false;
-           if(basefile.SectionFlag[i-1] or elf_section_flag_write=elf_section_flag_tls) then
-           AttributeData:=AttributeData or unifile_attribute_thread_local_storage;
+           if(basefile.SectionAlign[n-1]<Result.SectionAlign[i-1])and(basefile.SectionAlign[n-1]>0) then
+           Result.SectionAlign[i-1]:=basefile.SectionAlign[n-1];
+           if(NoAttribute=false) then
+            begin
+             if(basefile.SectionFlag[n-1] and elf_section_flag_write=elf_section_flag_write) then
+             AttributeData:=AttributeData or unifile_attribute_write;
+             if(basefile.SectionFlag[n-1] and elf_section_flag_alloc=elf_section_flag_alloc) then
+             AttributeData:=AttributeData or unifile_attribute_alloc;
+             if(basefile.SectionFlag[n-1] and elf_section_flag_executable=elf_section_flag_executable) then
+             AttributeData:=AttributeData or unifile_attribute_execute;
+             if(basefile.SectionFlag[n-1] and elf_section_flag_info_link=elf_section_flag_info_link) then
+             AttributeData:=AttributeData or unifile_attribute_information;
+             if(basefile.SectionFlag[n-1] and elf_section_flag_tls=elf_section_flag_tls)
+             then AttributeData:=AttributeData or unifile_attribute_thread_local_storage;
+            end;
+           if(basefile.SectionContent[n-1]<>nil) and (NotInFileBool) then NotInFileBool:=false;
            if(basescript.EntryAsStartOfSection) then
             begin
-             inc(Result.SectionContent[i-1].count);
-             SetLength(Result.SectionContent[i-1].ContentName,Result.SectionContent[i-1].count+
-             EntryIndex);
-             SetLength(Result.SectionContent[i-1].ContentNameHash,Result.SectionContent[i-1].count+
-             EntryIndex);
-             SetLength(Result.SectionContent[i-1].ContentSize,Result.SectionContent[i-1].count+
-             EntryIndex);
-             SetLength(Result.SectionContent[i-1].ContentOffset,Result.SectionContent[i-1].count+
-             EntryIndex);
-             SetLength(Result.SectionContent[i-1].Content,Result.SectionContent[i-1].count+
-             EntryIndex);
-             if(Result.EntrySectionIndex=0) and
-             (basefile.SectionNameHash[n-1]=Result.EntrySectionHash) then
+             inc(ContentPointer);
+             if(Result.EntrySectionIndex=0) and (basefile.SectionNameHash[n-1]=Result.EntrySectionHash)
+             and(EntrySectionEstimatedIndex=i) then
               begin
-               Result.EntrySectionIndex:=i; Result.EntryOffset:=0;
-               Result.SectionContent[i-1].ContentName[0]:=basefile.SectionName[n-1];
-               Result.SectionContent[i-1].ContentNameHash[0]:=basefile.SectionNameHash[n-1];
-               Result.SectionContent[i-1].ContentSize[0]:=basefile.SectionSize[n-1];
-               Result.SectionContent[i-1].ContentOffset[0]:=InternalOffsetAlternative;
-               Result.SectionContent[i-1].Content[0]:=basefile.SectionContent[n-1];
-               a:=2;
-               while(a<=Result.SectionContent[i-1].count+EntryIndex)do
+               Result.EntrySectionIndex:=i; Result.EntryOffset:=InternalOffsetAlternative;
+               Result.SectionContent[ContentStartIndex-1].Name:=basefile.SectionName[n-1];
+               Result.SectionContent[ContentStartIndex-1].NameHash:=basefile.SectionNameHash[n-1];
+               Result.SectionContent[ContentStartIndex-1].Index:=i;
+               Result.SectionContent[ContentStartIndex-1].Offset:=InternalOffsetAlternative;
+               Result.SectionContent[ContentStartIndex-1].Size:=basefile.SectionSize[n-1];
+               if(AttributeData and unifile_attribute_not_in_file=0) or
+               (basefile.SectionType[n-1]<>elf_section_type_nobit) then
+               Result.SectionContent[ContentStartIndex-1].Memory:=basefile.SectionContent[n-1];
+               a:=ContentStartIndex+1;
+               while(a<=ContentPointer)do
                 begin
-                 inc(Result.SectionContent[i-1].ContentOffset[a-1],basefile.SectionSize[n-1]);
+                 inc(Result.SectionContent[a-1].Offset,basefile.SectionSize[n-1]);
                  inc(a);
                 end;
                EntryIndex:=0;
               end
-             else
+             else if(EntrySectionEstimatedIndex=i) then
               begin
-               if(AttributeData and unifile_attribute_not_in_file=unifile_attribute_not_in_file) or
+               Result.SectionContent[ContentPointer+EntryIndex-1].Name:=basefile.SectionName[n-1];
+               Result.SectionContent[ContentPointer+EntryIndex-1].NameHash:=basefile.SectionNameHash[n-1];
+               Result.SectionContent[ContentPointer+EntryIndex-1].Index:=i;
+               Result.SectionContent[ContentPointer+EntryIndex-1].Offset:=InternalOffset;
+               Result.SectionContent[ContentPointer+EntryIndex-1].Size:=basefile.SectionSize[n-1];
+               if(AttributeData and unifile_attribute_not_in_file=0) and
                (basefile.SectionType[n-1]<>elf_section_type_nobit) then
                 begin
-                 Result.SectionContent[i-1].Content[Result.SectionContent[i-1].Count+EntryIndex-1]:=
+                 Result.SectionContent[ContentPointer+EntryIndex-1].Memory:=
                  basefile.SectionContent[n-1];
                 end;
-               Result.SectionContent[i-1].ContentName[Result.SectionContent[i-1].count+EntryIndex-1]:=
-               basefile.SectionName[n-1];
-               Result.SectionContent[i-1].ContentNameHash[Result.SectionContent[i-1].count+EntryIndex-1]:=
-               basefile.SectionNameHash[n-1];
-               Result.SectionContent[i-1].ContentSize[Result.SectionContent[i-1].count+EntryIndex-1]:=
-               basefile.SectionSize[n-1];
-               Result.SectionContent[i-1].ContentOffset[Result.SectionContent[i-1].Count+EntryIndex-1]:=
-               InternalOffset;
+              end
+             else
+              begin
+               Result.SectionContent[ContentPointer-1].Name:=basefile.SectionName[n-1];
+               Result.SectionContent[ContentPointer-1].NameHash:=basefile.SectionNameHash[n-1];
+               Result.SectionContent[ContentPointer-1].Index:=i;
+               Result.SectionContent[ContentPointer-1].Offset:=InternalOffset;
+               Result.SectionContent[ContentPointer-1].Size:=basefile.SectionSize[n-1];
+               if(AttributeData and unifile_attribute_not_in_file=0) and
+               (basefile.SectionType[n-1]<>elf_section_type_nobit) then
+                begin
+                 Result.SectionContent[ContentPointer-1].Memory:=basefile.SectionContent[n-1];
+                end;
               end;
             end
            else
             begin
-             inc(Result.SectionContent[i-1].count);
-             SetLength(Result.SectionContent[i-1].ContentName,Result.SectionContent[i-1].count);
-             SetLength(Result.SectionContent[i-1].ContentNameHash,Result.SectionContent[i-1].count);
-             SetLength(Result.SectionContent[i-1].ContentSize,Result.SectionContent[i-1].count);
-             SetLength(Result.SectionContent[i-1].ContentOffset,Result.SectionContent[i-1].count);
-             SetLength(Result.SectionContent[i-1].Content,Result.SectionContent[i-1].count);
-             Result.SectionContent[i-1].ContentName[Result.SectionContent[i-1].count-1]:=
-             basefile.SectionName[n-1];
-             Result.SectionContent[i-1].ContentNameHash[Result.SectionContent[i-1].count-1]:=
-             basefile.SectionNameHash[n-1];
-             Result.SectionContent[i-1].ContentSize[Result.SectionContent[i-1].count-1]:=
-             basefile.SectionSize[n-1];
-             Result.SectionContent[i-1].ContentOffset[Result.SectionContent[i-1].Count-1]:=
-             InternalOffset;
-             if(AttributeData and unifile_attribute_not_in_file=unifile_attribute_not_in_file) or
+             inc(ContentPointer);
+             Result.SectionContent[ContentPointer-1].Name:=basefile.SectionName[n-1];
+             Result.SectionContent[ContentPointer-1].NameHash:=basefile.SectionNameHash[n-1];
+             Result.SectionContent[ContentPointer-1].Index:=i;
+             Result.SectionContent[ContentPointer-1].Offset:=InternalOffset;
+             Result.SectionContent[ContentPointer-1].Size:=basefile.SectionSize[n-1];
+             if(AttributeData and unifile_attribute_not_in_file=0) and
              (basefile.SectionType[n-1]<>elf_section_type_nobit) then
               begin
-               Result.SectionContent[i-1].Content[Result.SectionContent[i-1].Count-1]:=
-               basefile.SectionContent[n-1];
+               Result.SectionContent[ContentPointer-1].Memory:=basefile.SectionContent[n-1];
               end;
              if(Result.EntrySectionIndex=0) and
              (basefile.SectionNameHash[n-1]=Result.EntrySectionHash) then
@@ -2615,49 +2691,48 @@ begin
       end;
      inc(k);
     end;
-   SetLength(Result.SectionContent[i-1].ContentSizeGot,Result.SectionContent[i-1].count);
    if(NotInFileBool) then AttributeData:=AttributeData or unifile_attribute_not_in_file;
    Result.SectionAttribute[i-1]:=AttributeData;
-   Result.SectionSize[i-1]:=InternalOffset;
-   if(InternalOffset=0) or (Result.SectionContent[i-1].count=0) then Result.SectionVaild[i-1]:=false
+   if(Result.SectionContentInfo[i-1].ContentStartIndex>ContentPointer)or(InternalOffset=0)then
+    begin
+     Result.SectionContentInfo[i-1].ContentStartIndex:=0;
+     Result.SectionVaild[i-1]:=false;
+    end
    else
     begin
-     Result.SectionContentAssist[i-1].BucketCount:=Result.SectionContent[i-1].count*8 div 7;
-     SetLength(Result.SectionContentAssist[i-1].BucketItem,
-     Result.SectionContentAssist[i-1].BucketCount+1);
-     SetLength(Result.SectionContentAssist[i-1].BucketHash,
-     Result.SectionContentAssist[i-1].BucketCount+1);
-     SetLength(Result.SectionContentAssist[i-1].BucketEnable,
-     Result.SectionContentAssist[i-1].BucketCount+1);
-     Result.SectionContentAssist[i-1].ChainCount:=Result.SectionContent[i-1].count;
-     SetLength(Result.SectionContentAssist[i-1].ChainItem,
-     Result.SectionContentAssist[i-1].ChainCount+1);
-     SetLength(Result.SectionContentAssist[i-1].ChainHash,
-     Result.SectionContentAssist[i-1].ChainCount+1);
-     SetLength(Result.SectionContentAssist[i-1].ChainEnable,
-     Result.SectionContentAssist[i-1].ChainCount+1);
-     j:=1;
-     while(j<=Result.SectionContent[i-1].Count)do
-      begin
-       k:=Result.SectionContent[i-1].ContentNameHash[j-1] mod
-       Result.SectionContentAssist[i-1].BucketCount+1;
-       if(Result.SectionContentAssist[i-1].BucketEnable[k]=false) then
-        begin
-         Result.SectionContentAssist[i-1].BucketEnable[k]:=true;
-         Result.SectionContentAssist[i-1].BucketItem[k]:=j;
-         Result.SectionContentAssist[i-1].BucketHash[k]:=Result.SectionContent[i-1].ContentNameHash[j-1];
-        end
-       else
-        begin
-         k:=Result.SectionContentAssist[i-1].BucketItem[k];
-         while(Result.SectionContentAssist[i-1].ChainEnable[k]) do
-         k:=Result.SectionContentAssist[i-1].ChainItem[k];
-         Result.SectionContentAssist[i-1].ChainEnable[k]:=true;
-         Result.SectionContentAssist[i-1].ChainItem[k]:=j;
-         Result.SectionContentAssist[i-1].ChainHash[k]:=Result.SectionContent[i-1].ContentNameHash[j-1];
-        end;
-       inc(j);
-      end;
+     Result.SectionContentInfo[i-1].ContentCount:=ContentPointer-
+     Result.SectionContentInfo[i-1].ContentStartIndex+1;
+     Result.SectionContentInfo[i-1].ContentSize:=InternalOffset;
+    end;
+   inc(i);
+  end;
+ {Then Generate the Content Assistance}
+ i:=1; ContentCount:=ContentPointer;
+ Result.SectionContentAssist.BucketCount:=unifile_hash_table_bucket_count(ContentCount);
+ SetLength(Result.SectionContentAssist.BucketEnable,Result.SectionContentAssist.BucketCount+1);
+ SetLength(Result.SectionContentAssist.BucketHash,Result.SectionContentAssist.BucketCount+1);
+ SetLength(Result.SectionContentAssist.BucketItem,Result.SectionContentAssist.BucketCount+1);
+ Result.SectionContentAssist.ChainCount:=ContentCount;
+ SetLength(Result.SectionContentAssist.ChainEnable,Result.SectionContentAssist.ChainCount+1);
+ SetLength(Result.SectionContentAssist.ChainHash,Result.SectionContentAssist.ChainCount+1);
+ SetLength(Result.SectionContentAssist.ChainItem,Result.SectionContentAssist.ChainCount+1);
+ while(i<=ContentCount)do
+  begin
+   j:=Result.SectionContent[i-1].NameHash mod Result.SectionContentAssist.BucketCount+1;
+   if(Result.SectionContentAssist.BucketEnable[j]=false) then
+    begin
+     Result.SectionContentAssist.BucketEnable[j]:=true;
+     Result.SectionContentAssist.BucketItem[j]:=i;
+     Result.SectionContentAssist.BucketHash[j]:=Result.SectionContent[i-1].NameHash;
+    end
+   else
+    begin
+     j:=Result.SectionContentAssist.BucketItem[j];
+     while(Result.SectionContentAssist.ChainEnable[j])do
+     j:=Result.SectionContentAssist.ChainItem[j];
+     Result.SectionContentAssist.ChainEnable[j]:=true;
+     Result.SectionContentAssist.ChainItem[j]:=i;
+     Result.SectionContentAssist.ChainHash[j]:=Result.SectionContent[i-1].NameHash;
     end;
    inc(i);
   end;
@@ -2704,7 +2779,7 @@ begin
      inc(k);
      Result.SymbolTable.SymbolName[k-1]:=basescript.DynamicSectionAlias;
      Result.SymbolTable.SymbolNameHash[k-1]:=
-     unihash_generate_value(basescript.GlobalOffsetTableAlias,false);
+     unihash_generate_value(basescript.DynamicSectionAlias,false);
      Result.SymbolTable.SymbolSectionName[k-1]:='.dynamic';
      Result.SymbolTable.SymbolSectionNameHash[k-1]:=unihash_generate_value('.dynamic',true);
      Result.SymbolTable.SymbolBinding[k-1]:=elf_symbol_bind_local;
@@ -2755,7 +2830,7 @@ begin
           SymbolClear[VaildList[j-1]-1]:=1 else SymbolClear[VaildList[j-1]-1]:=2;
           inc(j);
          end;
-       End;
+       end;
       end;
     end;
    if(basefile.SectionSymbolTable.SymbolSectionNameHash[i-1]=0)
@@ -2775,7 +2850,7 @@ begin
   end;
  Result.SymbolTable.SymbolCount:=k; Result.SymbolCount:=k;
  {Then Generate the Symbol Assistance Table}
- Result.SymbolTableAssist.BucketCount:=Result.SymbolTable.SymbolCount*8 div 7;
+ Result.SymbolTableAssist.BucketCount:=unifile_hash_table_bucket_count(Result.SymbolTable.SymbolCount);
  SetLength(Result.SymbolTableAssist.BucketItem,Result.SymbolTableAssist.BucketCount+1);
  SetLength(Result.SymbolTableAssist.BucketHash,Result.SymbolTableAssist.BucketCount+1);
  SetLength(Result.SymbolTableAssist.BucketEnable,Result.SymbolTableAssist.BucketCount+1);
@@ -2825,47 +2900,35 @@ begin
  SetLength(Result.AdjustTable.AdjustRiscVType,j);
  if(basescript.elfclass=unild_class_relocatable) and
  (basescript.IsEFIFile=false) and (basescript.IsUntypedBinary=false) then
-  begin
-   SetLength(AdjustVaildIndex,j);
-   AdjustVaildIndex[0]:=0;
-  end;
+ SetLength(AdjustVaildIndex,j);
  AdjustVaildCount:=0;
  i:=1; n:=1;
  while(i<=basefile.SectionRelocationCount)do
   begin
    j:=1; k:=Result.SectionCount; m:=0;
-   while(j<=k)do
-    begin
-     if(Result.SectionVaild[j-1]=false) then
-      begin
-       inc(j); continue;
-      end;
-     m:=unifile_search_for_hash_table(Result.SectionContentAssist[j-1],
-     basefile.SectionRelocation[i-1].RelocationSectionHash);
-     if(m<>0) then break;
-     inc(j);
-    end;
-   if(j>k) then
+   m:=unifile_search_for_hash_table(Result.SectionContentAssist,
+   basefile.SectionRelocation[i-1].RelocationSectionHash);
+   if(m=0) then
     begin
      inc(i); continue;
     end;
+   j:=Result.SectionContent[m-1].Index;
    a:=1; b:=basefile.SectionRelocation[i-1].RelocationCount;
    while(a<=b)do
     begin
      Result.AdjustTable.OriginalSectionIndex[n-1]:=j;
      Result.AdjustTable.OriginalOffset[n-1]:=
-     Result.SectionContent[j-1].ContentOffset[m-1]+basefile.SectionRelocation[i-1].RelocationOffset[a-1];
+     Result.SectionContent[m-1].Offset+basefile.SectionRelocation[i-1].RelocationOffset[a-1];
      c:=unifile_search_for_hash_table(Result.SymbolTableAssist,
      basefile.SectionRelocation[i-1].RelocationSymbolHash[a-1]);
      if(c=0) then
       begin
        inc(a); continue;
       end;
+     d:=0; f:=0;
      if(basescript.SectionCountExtra>0) and
-     (((basescript.DynamicSectionEnable) and
-      (c=basescript.DynamicSectionIndex)) or
-     ((basescript.GlobalOffsetTableSectionEnable) and
-      (c=basescript.GlobalOffsetTableSectionIndex))) then
+     (((basescript.DynamicSectionEnable) and (c=basescript.DynamicSectionIndex)) or
+     ((basescript.GlobalOffsetTableSectionEnable) and (c=basescript.GlobalOffsetTableSectionIndex))) then
       begin
        goto JumpToAutoSection;
       end;
@@ -2878,19 +2941,10 @@ begin
        readln;
        halt;
       end;
-     d:=1; e:=Result.SectionCount; f:=0;
-     while(d<=e)do
-      begin
-       if(Result.SectionVaild[d-1]=false) then
-        begin
-         inc(d); continue;
-        end;
-       f:=unifile_search_for_hash_table(Result.SectionContentAssist[d-1],
-       Result.SymbolTable.SymbolSectionNameHash[c-1]);
-       if(f<>0) then break;
-       inc(d);
-      end;
-     if(d>e) then d:=0;
+     e:=Result.SectionCount;
+     f:=unifile_search_for_hash_table(Result.SectionContentAssist,
+     Result.SymbolTable.SymbolSectionNameHash[c-1]);
+     if(f<>0) then d:=Result.SectionContent[f-1].Index;
      JumpToAutoSection:
      if(basescript.SectionCountExtra>0) then
       begin
@@ -2901,9 +2955,9 @@ begin
        d:=e+basescript.GlobalOffsetTableSectionIndex;
       end;
      Result.AdjustTable.GoalSectionIndex[n-1]:=d;
-     if(d<>0) and (d<=e) then
+     if(f<>0) then
      Result.AdjustTable.GoalOffset[n-1]:=
-     Result.SectionContent[d-1].ContentOffset[f-1]+Result.SymbolTable.SymbolValue[c-1]
+     Result.SectionContent[f-1].Offset+Result.SymbolTable.SymbolValue[c-1]
      else Result.AdjustTable.GoalOffset[n-1]:=0;
      if(Result.SymbolTable.SymbolType[c-1]=elf_symbol_type_function) then
      Result.AdjustTable.AdjustFunc[n-1]:=true;
@@ -2946,7 +3000,9 @@ begin
        writeln('Check all the object files which comprises this symbol.');
        readln;
        halt;
-      end;
+      end
+     else if(basescript.IsEFIFile=false) and (basescript.IsUntypedBinary=false) and (d=0) then
+     Result.ExternalNeeded:=true;
      inc(Result.AdjustTable.Count);
      inc(n); inc(a);
     end;
@@ -3026,36 +3082,49 @@ begin
  else exit(SizeUint(-value));
 end;
 function unifile_check_relocation(RelocationArchitecture:word;RelocationBits:byte;
-RelocationType:SizeUint;GoalBool:boolean=true):boolean;
+RelocationType:SizeUint;GoalBool:boolean=true):unifile_check_result;
 begin
- Result:=false;
+ Result.GotBool:=false; Result.NeedRelocationBits:=0;
  case RelocationArchitecture of
  elf_machine_386:
   begin
    case RelocationType of
-   elf_reloc_i386_got32,elf_reloc_i386_got_offset:Result:=true;
-   elf_reloc_i386_got_relaxable:Result:=GoalBool;
+   elf_reloc_i386_32bit:Result.NeedRelocationBits:=32;
+   elf_reloc_i386_16bit:Result.NeedRelocationBits:=16;
+   elf_reloc_i386_got32,elf_reloc_i386_got_offset:Result.GotBool:=true;
+   elf_reloc_i386_got_relaxable:Result.GotBool:=GoalBool;
    end;
   end;
  elf_machine_arm:
   begin
    case RelocationType of
+   elf_reloc_arm_absolute_32bit:Result.NeedRelocationBits:=32;
+   elf_reloc_arm_absolute_16bit:Result.NeedRelocationBits:=16;
    elf_reloc_arm_got_absolute,elf_reloc_arm_got_pc_relative,elf_reloc_arm_got_relative_to_got_origin,
-   elf_reloc_arm_got_offset_12bit:Result:=true;
+   elf_reloc_arm_got_offset_12bit:Result.GotBool:=true;
    end;
   end;
  elf_machine_x86_64:
   begin
    case RelocationType of
+   elf_reloc_x86_64_64bit:Result.NeedRelocationBits:=64;
+   elf_reloc_x86_64_32bit,elf_reloc_x86_64_32bit_sign:Result.NeedRelocationBits:=32;
+   elf_reloc_x86_64_16bit:Result.NeedRelocationBits:=16;
    elf_reloc_x86_64_got_32bit,elf_reloc_x86_64_got_offset64,elf_reloc_x86_64_got_pc32,
-   elf_reloc_x86_64_got64,elf_reloc_x86_64_got_pc_relative,elf_reloc_x86_64_got_pc64,
-   elf_reloc_x86_64_got_plt64,elf_reloc_x86_64_plt_offset64:Result:=true;
-   elf_reloc_x86_64_got_pc_rel,elf_reloc_x86_64_rex_got_pc_rel:Result:=GoalBool;
+   elf_reloc_x86_64_got64,elf_reloc_x86_64_got_pc64,
+   elf_reloc_x86_64_got_pc_relative,
+   elf_reloc_x86_64_got_plt64,elf_reloc_x86_64_plt_offset64:Result.GotBool:=true;
+   elf_reloc_x86_64_pc_relative_offset_got,
+   elf_reloc_x86_64_got_pc_relative_without_rex,elf_reloc_x86_64_got_pc_relative_with_rex:
+   Result.GotBool:=not GoalBool;
    end;
   end;
  elf_machine_aarch64:
   begin
    case RelocationType of
+   elf_reloc_aarch64_32bit_absolute,elf_reloc_aarch64_absolute_32bit:Result.NeedRelocationBits:=32;
+   elf_reloc_aarch64_absolute_64bit:Result.NeedRelocationBits:=64;
+   elf_reloc_aarch64_absolute_16bit:Result.NeedRelocationBits:=16;
    elf_reloc_aarch64_got_rel_offset_movn_z_imm_bit15_0,elf_reloc_aarch64_got_rel_offset_movk_imm_bit15_0,
    elf_reloc_aarch64_got_rel_offset_movn_z_imm_bit31_16,
    elf_reloc_aarch64_got_rel_offset_movk_imm_bit31_16,
@@ -3078,23 +3147,27 @@ begin
    elf_reloc_aarch64_got_rel_movn_z_bit31_16_local_dynamic_model,
    elf_reloc_aarch64_got_rel_movk_imm_bit15_0_local_dynamic_model,
    elf_reloc_aarch64_new_global_entry,elf_reloc_aarch64_new_plt_entry,
-   elf_reloc_aarch64_relative:Result:=true;
+   elf_reloc_aarch64_relative:Result.GotBool:=true;
    end;
   end;
  elf_machine_riscv:
   begin
    case RelocationType of
-   elf_reloc_riscv_got_high_20bit:Result:=true;
+   elf_reloc_riscv_32bit:Result.NeedRelocationBits:=32;
+   elf_reloc_riscv_64bit:Result.NeedRelocationBits:=64;
+   elf_reloc_riscv_got_high_20bit:Result.GotBool:=true;
    end;
   end;
  elf_machine_loongarch:
   begin
    case RelocationType of
+   elf_reloc_loongarch_32bit:Result.NeedRelocationBits:=32;
+   elf_reloc_loongarch_64bit:Result.NeedRelocationBits:=64;
    elf_reloc_loongarch_got_pc_high_20bit,
    elf_reloc_loongarch_got_pc_low_12bit,
    elf_reloc_loongarch_got64_pc_low_20bit,elf_reloc_loongarch_got64_pc_high_12bit,
    elf_reloc_loongarch_got_high_20bit,elf_reloc_loongarch_got_low_12bit,
-   elf_reloc_loongarch_got64_low_20bit,elf_reloc_loongarch_got64_high_12bit:Result:=true;
+   elf_reloc_loongarch_got64_low_20bit,elf_reloc_loongarch_got64_high_12bit:Result.GotBool:=true;
    end;
   end;
  end;
@@ -3103,20 +3176,24 @@ function unifile_calculate_relocation(RelocationArchitecture:word;RelocationBits
 RelocationType:SizeUint;GotType:byte;RelocationData:array of SizeInt;GoalBool:boolean=true;
 RiscvSpecial:byte=0):unifile_result;
 begin
- Result.GotType:=0; Result.Bits:=0; Result.AdjustValue:=0; Result.SpecialBool:=false; Result.RiscvType:=0;
+ Result.GotType:=0; Result.Bits:=0; Result.AdjustValue:=0; Result.SpecialBool:=false;
+ Result.RiscvType:=0; Result.ConvertToRelocationBits:=0;
  case RelocationArchitecture of
  elf_machine_386:
   begin
    Result.Bits:=32;
    {Data Sequence:S,A,B,P,L,GOT,G}
    case RelocationType of
-   elf_reloc_i386_32bit:Result.AdjustValue:=RelocationData[0]+RelocationData[1];
+   elf_reloc_i386_32bit:
+    begin
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.ConvertToRelocationBits:=32;
+    end;
    elf_reloc_i386_pc32:Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[3];
    elf_reloc_i386_got32:
     begin
      Result.AdjustValue:=RelocationData[6]+RelocationData[1]; Result.GotType:=GotType;
     end;
-   elf_reloc_i386_plt32:Result.AdjustValue:=RelocationData[4]+RelocationData[1]-RelocationData[3];
+   elf_reloc_i386_plt32:Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[4];
    elf_reloc_i386_new_got_entry:Result.AdjustValue:=RelocationData[0];
    elf_reloc_i386_new_plt_entry:Result.AdjustValue:=RelocationData[0];
    elf_reloc_i386_relative:Result.AdjustValue:=RelocationData[2]+RelocationData[1];
@@ -3130,6 +3207,7 @@ begin
    elf_reloc_i386_16bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=16;
+     Result.ConvertToRelocationBits:=16;
     end;
    elf_reloc_i386_pc16bit:
     begin
@@ -3146,10 +3224,11 @@ begin
    elf_reloc_i386_got_relaxable:
     begin
      Result.SpecialBool:=GoalBool;
-     if(GoalBool) then
+     if(GoalBool=false) then
      Result.AdjustValue:=RelocationData[5]+RelocationData[6]+RelocationData[1]-RelocationData[3]
      else
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[3];
+     Result.Bits:=32;
     end
    else exit(Result);
    end;
@@ -3165,7 +3244,10 @@ begin
      Result.Bits:=26;
     end;
    elf_reloc_arm_absolute_32bit:
-   Result.AdjustValue:=(RelocationData[0]+RelocationData[1]) or RelocationData[3];
+    begin
+     Result.AdjustValue:=(RelocationData[0]+RelocationData[1]) or RelocationData[3];
+     Result.ConvertToRelocationBits:=32;
+    end;
    elf_reloc_arm_pc_relative_32bit:
    Result.AdjustValue:=((RelocationData[0]+RelocationData[1]) or RelocationData[3])-RelocationData[4];
    elf_reloc_arm_pc_relative_13bit_branch:
@@ -3176,6 +3258,7 @@ begin
    elf_reloc_arm_absolute_16bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=16;
+     Result.ConvertToRelocationBits:=16;
     end;
    elf_reloc_arm_absolute_12bit:
     begin
@@ -3487,7 +3570,7 @@ begin
    case RelocationType of
    elf_reloc_x86_64_64bit:
     begin
-     Result.AdjustValue:=RelocationData[0]+RelocationData[1];
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.ConvertToRelocationBits:=64;
     end;
    elf_reloc_x86_64_pc_32bit:
     begin
@@ -3511,16 +3594,27 @@ begin
     end;
    elf_reloc_x86_64_pc_relative_offset_got:
     begin
-     Result.AdjustValue:=RelocationData[6]+RelocationData[5]+RelocationData[1]-RelocationData[3];
-     Result.Bits:=32; Result.GotType:=GotType;
+     Result.SpecialBool:=GoalBool;
+     if(GoalBool=false) then
+      begin
+       Result.AdjustValue:=RelocationData[6]+RelocationData[5]+RelocationData[1]-RelocationData[3];
+       Result.Bits:=32; Result.GotType:=GotType;
+      end
+     else
+      begin
+       Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[3];
+       Result.Bits:=32;
+      end;
     end;
    elf_reloc_x86_64_32bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=32;
+     Result.ConvertToRelocationBits:=32;
     end;
    elf_reloc_x86_64_16bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=16;
+     Result.ConvertToRelocationBits:=16;
     end;
    elf_reloc_x86_64_pc_16bit:
     begin
@@ -3540,8 +3634,8 @@ begin
     end;
    elf_reloc_x86_64_got_offset64:
     begin
-     Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[5]; Result.Bits:=64;
-     Result.GotType:=GotType;
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[5];
+     Result.Bits:=64; Result.GotType:=GotType;
     end;
    elf_reloc_x86_64_got_pc32:
     begin
@@ -3566,6 +3660,7 @@ begin
    elf_reloc_x86_64_got_plt64:
     begin
      Result.AdjustValue:=RelocationData[4]+RelocationData[1]; Result.Bits:=64;
+     Result.GotType:=GotType;
     end;
    elf_reloc_x86_64_plt_offset64:
     begin
@@ -3584,14 +3679,13 @@ begin
     begin
      Result.AdjustValue:=RelocationData[2]+RelocationData[1]; Result.Bits:=64;
     end;
-   elf_reloc_x86_64_got_pc_rel,elf_reloc_x86_64_rex_got_pc_rel:
+   elf_reloc_x86_64_got_pc_relative_without_rex,elf_reloc_x86_64_got_pc_relative_with_rex:
     begin
-     Result.SpecialBool:=GoalBool;
+     Result.SpecialBool:=GoalBool; Result.Bits:=32;
      if(GoalBool=false) then
      Result.AdjustValue:=RelocationData[5]+RelocationData[6]+RelocationData[1]-RelocationData[3]
      else
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[3];
-     Result.Bits:=32;
     end
    else exit(Result);
    end;
@@ -3601,8 +3695,12 @@ begin
    Result.Bits:=64;
    {Data Sequence:S,A,Delta,P,GDAT,GOT,G,B}
    case RelocationType of
-   elf_reloc_aarch64_32bit_absolute,elf_reloc_aarch64_32bit_new_got_entry,
-   elf_reloc_aarch64_32bit_new_plt_entry:
+   elf_reloc_aarch64_32bit_absolute:
+    begin
+     Result.AdjustValue:=RelocationData[0]; Result.Bits:=32;
+     Result.ConvertToRelocationBits:=32;
+    end;
+   elf_reloc_aarch64_32bit_new_got_entry,elf_reloc_aarch64_32bit_new_plt_entry:
     begin
      Result.AdjustValue:=RelocationData[0]; Result.Bits:=32;
     end;
@@ -3613,14 +3711,17 @@ begin
    elf_reloc_aarch64_absolute_64bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=64;
+     Result.ConvertToRelocationBits:=64;
     end;
    elf_reloc_aarch64_absolute_32bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=32;
+     Result.ConvertToRelocationBits:=32;
     end;
    elf_reloc_aarch64_absolute_16bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=16;
+     Result.ConvertToRelocationBits:=16;
     end;
    elf_reloc_aarch64_absolute_pc_relative_64bit:
     begin
@@ -3801,10 +3902,12 @@ begin
    elf_reloc_riscv_32bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=32;
+     Result.ConvertToRelocationBits:=32;
     end;
    elf_reloc_riscv_64bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=64;
+     Result.ConvertToRelocationBits:=64;
     end;
    elf_reloc_riscv_relative:
     begin
@@ -3965,10 +4068,12 @@ begin
    elf_reloc_loongarch_32bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=32;
+     Result.ConvertToRelocationBits:=32;
     end;
    elf_reloc_loongarch_64bit:
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=64;
+     Result.ConvertToRelocationBits:=64;
     end;
    elf_reloc_loongarch_relative:Result.AdjustValue:=RelocationData[3]+RelocationData[1];
    elf_reloc_loongarch_jump_slot:Result.AdjustValue:=RelocationData[0];
@@ -4117,6 +4222,7 @@ var fs:TFileStream;
     WritePointer,WritePointer2:SizeUint;
     StartOffset,EndOffset,StartAddress,EndAddress:SizeUint;
     i:SizeUint;
+    ELFBool:boolean=false;
 begin
  Content:=allocmem(outputfile.FinalFileSize);
  StartOffset:=0; StartAddress:=basescript.BaseAddress; EndOffset:=0; EndAddress:=0;
@@ -4130,7 +4236,7 @@ begin
      Pelf32_header(Content)^.elf_id[elf_data_position]:=elf_data_lsb;
      Pelf32_header(Content)^.elf_id[elf_file_version_position]:=elf_file_version_current;
      Pelf32_header(Content)^.elf_id[elf_os_abi_position]:=basescript.SystemIndex*3;
-     Pelf32_header(Content)^.elf_id[elf_abi_version_position]:=1;
+     Pelf32_header(Content)^.elf_id[elf_abi_version_position]:=0;
      if(basescript.elfclass=unild_class_relocatable) then
      Pelf32_header(Content)^.elf_type:=elf_type_relocatable
      else if(basescript.elfclass=unild_class_sharedobject) then
@@ -4165,6 +4271,19 @@ begin
      Pelf32_header(Content)^.elf_section_header_size:=sizeof(elf32_section_header);
      Pelf32_header(Content)^.elf_section_header_string_table_index:=outputfile.StringTableIndex;
      WritePointer:=sizeof(elf32_header);
+     Pelf32_program_header(Content+WritePointer)^.program_offset:=sizeof(elf32_header);
+     Pelf32_program_header(Content+WritePointer)^.program_physical_address:=
+     outputfile.BaseAddress+sizeof(elf32_header);
+     Pelf32_program_header(Content+WritePointer)^.program_file_size:=
+     outputfile.FileProgramCount*sizeof(elf32_program_header);
+     Pelf32_program_header(Content+WritePointer)^.program_memory_size:=
+     outputfile.FileProgramCount*sizeof(elf32_program_header);
+     Pelf32_program_header(Content+WritePointer)^.program_align:=4;
+     Pelf32_program_header(Content+WritePointer)^.program_virtual_address:=
+     outputfile.BaseAddress+sizeof(elf32_header);
+     Pelf32_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
+     Pelf32_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_self;
+     inc(WritePointer,sizeof(elf32_program_header));
      if(outputfile.FileProgramCount>0) then
       begin
        i:=1;
@@ -4176,26 +4295,42 @@ begin
          readln;
          halt;
         end;
-       StartAddress:=0; StartOffset:=0;
+       StartAddress:=outputfile.BaseAddress; StartOffset:=0;
        PartAlign:=0; PartAttribute:=0;
        while(i<=outputfile.SectionCount)do
         begin
-         if(PartAlign=0) then PartAlign:=outputfile.SectionAlign[i-1]
-         else if(outputfile.SectionAlign[i-1]>PartAlign) then PartAlign:=outputfile.SectionAlign[i-1];
-         PartAttribute:=PartAttribute or outputfile.SectionAttribute[i-1];
-         if(outputfile.SectionAttribute[i-1]<>0) and (StartAddress=0) and (StartOffset=0)
-         and (WritePointer>sizeof(elf32_header)) then
+         if(outputfile.FileAlign=0) then
           begin
-           StartAddress:=outputfile.SectionAddress[i-1];
-           StartOffset:=outputfile.SectionOffset[i-1];
+           if(PartAlign=0) then PartAlign:=outputfile.SectionAlign[i-1]
+           else if(outputfile.SectionAlign[i-1]<PartAlign) then PartAlign:=outputfile.SectionAlign[i-1];
+          end
+         else PartAlign:=outputfile.FileAlign;
+         PartAttribute:=(PartAttribute or outputfile.SectionAttribute[i-1])
+         and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage);
+         if(ELFBool) and
+         (outputfile.SectionAttribute[i-1]<>0) and
+         (StartAddress=outputfile.BaseAddress) and (StartOffset=0) then
+          begin
+           StartAddress:=outputfile.SectionAddress[i-1]; StartOffset:=outputfile.SectionOffset[i-1];
           end;
          if(outputfile.SectionAttribute[i-1]<>0) then
           begin
            EndAddress:=outputfile.SectionAddress[i-1]+outputfile.SectionSize[i-1];
-           EndOffset:=outputfile.SectionOffset[i-1]+outputfile.SectionSize[i-1];
+           if(outputfile.SectionAttribute[i-1] and unifile_attribute_not_in_file=0) then
+           EndOffset:=outputfile.SectionOffset[i-1]+outputfile.SectionSize[i-1]
+           else
+           EndOffset:=outputfile.SectionOffset[i-1];
           end;
-         if((i>1) and (outputfile.SectionAttribute[i-2]<>outputfile.SectionAttribute[i-1])
-         and (outputfile.SectionAttribute[i-2]<>0)) or (i=outputfile.SectionCount) then
+         if(i<outputfile.SectionCount)
+         and (outputfile.SectionAttribute[i-1] and
+         (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)<>outputfile.SectionAttribute[i]
+         and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)) and
+         (outputfile.SectionAttribute[i-1] and
+         (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)<>0) then
           begin
            Pelf32_program_header(Content+WritePointer)^.program_offset:=StartOffset;
            Pelf32_program_header(Content+WritePointer)^.program_physical_address:=StartAddress;
@@ -4221,7 +4356,21 @@ begin
            else
            Pelf32_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_load;
            inc(WritePointer,sizeof(elf32_program_header));
-           StartAddress:=0; StartOffset:=0;
+           StartAddress:=outputfile.BaseAddress;
+           StartOffset:=0; PartAttribute:=0; PartAlign:=0; ELFBool:=true;
+          end
+         else if(i<outputfile.SectionCount) and (outputfile.SectionAttribute[i-1] and
+         (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)<>outputfile.SectionAttribute[i]
+         and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)) and
+         (outputfile.SectionAttribute[i-1] and
+          (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+          or unifile_attribute_thread_local_storage)=0) then
+          begin
+           StartAddress:=outputfile.BaseAddress;
+           StartOffset:=0;
+           PartAttribute:=0; PartAlign:=0;
           end;
          if(outputfile.SectionName[i-1]='.interp') then
           begin
@@ -4236,6 +4385,7 @@ begin
            Pelf32_program_header(Content+WritePointer)^.program_align:=1;
            Pelf32_program_header(Content+WritePointer)^.program_virtual_address:=
            outputfile.SectionAddress[i-1];
+           Pelf32_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
            Pelf32_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_interp;
            inc(WritePointer,sizeof(elf32_program_header));
           end;
@@ -4252,23 +4402,26 @@ begin
            Pelf32_program_header(Content+WritePointer)^.program_align:=4;
            Pelf32_program_header(Content+WritePointer)^.program_virtual_address:=
            outputfile.SectionAddress[i-1];
+           Pelf32_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
            Pelf32_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_dynamic;
            inc(WritePointer,sizeof(elf32_program_header));
           end;
          inc(i);
         end;
-       if(basescript.NoExecutableStack) then
-        begin
-         Pelf32_program_header(Content+WritePointer)^.program_offset:=0;
-         Pelf32_program_header(Content+WritePointer)^.program_physical_address:=0;
-         Pelf32_program_header(Content+WritePointer)^.program_file_size:=0;
-         Pelf32_program_header(Content+WritePointer)^.program_memory_size:=0;
-         Pelf32_program_header(Content+WritePointer)^.program_align:=4;
-         Pelf32_program_header(Content+WritePointer)^.program_virtual_address:=0;
-         Pelf32_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_gnu_stack;
-         inc(WritePointer,sizeof(elf32_program_header));
-        end;
-       if(basescript.NoGotWritable) then
+       Pelf32_program_header(Content+WritePointer)^.program_offset:=0;
+       Pelf32_program_header(Content+WritePointer)^.program_physical_address:=0;
+       Pelf32_program_header(Content+WritePointer)^.program_file_size:=0;
+       Pelf32_program_header(Content+WritePointer)^.program_memory_size:=0;
+       Pelf32_program_header(Content+WritePointer)^.program_align:=4;
+       Pelf32_program_header(Content+WritePointer)^.program_virtual_address:=0;
+       Pelf32_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc
+       or elf_program_header_write;
+       if(basescript.NoExecutableStack=false) then
+       Pelf32_program_header(Content+WritePointer)^.program_flags:=
+       Pelf32_program_header(Content+WritePointer)^.program_flags or elf_program_header_execute;
+       Pelf32_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_gnu_stack;
+       inc(WritePointer,sizeof(elf32_program_header));
+       if(basescript.GotAuthority>0) and (outputfile.GotIndex>0) then
         begin
          Pelf32_program_header(Content+WritePointer)^.program_offset:=
          outputfile.SectionOffset[outputfile.GotIndex-1];
@@ -4281,9 +4434,13 @@ begin
          Pelf32_program_header(Content+WritePointer)^.program_align:=4;
          Pelf32_program_header(Content+WritePointer)^.program_virtual_address:=
          outputfile.SectionAddress[outputfile.GotIndex-1];
+         Pelf32_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
+         if(basescript.GotAuthority=1) then
+         Pelf32_program_header(Content+WritePointer)^.program_flags:=
+         Pelf32_program_header(Content+WritePointer)^.program_flags or elf_program_header_write;
          Pelf32_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_gnu_relro;
          inc(WritePointer,sizeof(elf32_program_header));
-        end
+        end;
       end;
      i:=1; WritePointer2:=outputfile.FinalSectionOffset+sizeof(elf32_section_header);
      for i:=1 to outputfile.SectionCount do
@@ -4400,8 +4557,7 @@ begin
         begin
          Pelf32_section_header(Content+WritePointer2)^.section_header_link:=
          outputfile.DynamicStringTableIndex;
-         Pelf32_section_header(Content+WritePointer2)^.section_header_info:=
-         outputfile.DynamicSymbolTableLocalCount+1;
+         Pelf32_section_header(Content+WritePointer2)^.section_header_info:=1;
         end
        else if(outputfile.SectionName[i-1]='.symtab') then
         begin
@@ -4430,7 +4586,7 @@ begin
      Pelf64_header(Content)^.elf_id[elf_data_position]:=elf_data_lsb;
      Pelf64_header(Content)^.elf_id[elf_file_version_position]:=elf_file_version_current;
      Pelf64_header(Content)^.elf_id[elf_os_abi_position]:=basescript.SystemIndex*3;
-     Pelf64_header(Content)^.elf_id[elf_abi_version_position]:=1;
+     Pelf64_header(Content)^.elf_id[elf_abi_version_position]:=0;
      if(basescript.elfclass=unild_class_relocatable) then
      Pelf64_header(Content)^.elf_type:=elf_type_relocatable
      else if(basescript.elfclass=unild_class_sharedobject) then
@@ -4465,6 +4621,19 @@ begin
      Pelf64_header(Content)^.elf_section_header_size:=sizeof(elf64_section_header);
      Pelf64_header(Content)^.elf_section_header_string_table_index:=outputfile.StringTableIndex;
      WritePointer:=sizeof(elf64_header);
+     Pelf64_program_header(Content+WritePointer)^.program_offset:=sizeof(elf64_header);
+     Pelf64_program_header(Content+WritePointer)^.program_physical_address:=
+     outputfile.BaseAddress+sizeof(elf64_header);
+     Pelf64_program_header(Content+WritePointer)^.program_file_size:=
+     outputfile.FileProgramCount*sizeof(elf64_program_header);
+     Pelf64_program_header(Content+WritePointer)^.program_memory_size:=
+     outputfile.FileProgramCount*sizeof(elf64_program_header);
+     Pelf64_program_header(Content+WritePointer)^.program_align:=8;
+     Pelf64_program_header(Content+WritePointer)^.program_virtual_address:=
+     outputfile.BaseAddress+sizeof(elf64_header);
+     Pelf64_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
+     Pelf64_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_self;
+     inc(WritePointer,sizeof(elf64_program_header));
      if(outputfile.FileProgramCount>0) then
       begin
        i:=1;
@@ -4476,15 +4645,21 @@ begin
          readln;
          halt;
         end;
-       StartAddress:=0; StartOffset:=0;
+       StartAddress:=outputfile.BaseAddress; StartOffset:=0;
        PartAlign:=0; PartAttribute:=0;
        while(i<=outputfile.SectionCount)do
         begin
-         if(PartAlign=0) then PartAlign:=outputfile.SectionAlign[i-1]
-         else if(outputfile.SectionAlign[i-1]>PartAlign) then PartAlign:=outputfile.SectionAlign[i-1];
-         PartAttribute:=PartAttribute or outputfile.SectionAttribute[i-1];
-         if(outputfile.SectionAttribute[i-1]<>0) and (StartAddress=0) and (StartOffset=0)
-         and (WritePointer>sizeof(elf64_header)) then
+         if(outputfile.FileAlign=0) then
+          begin
+           if(PartAlign=0) then PartAlign:=outputfile.SectionAlign[i-1]
+           else if(outputfile.SectionAlign[i-1]<PartAlign) then PartAlign:=outputfile.SectionAlign[i-1];
+          end
+         else PartAlign:=outputfile.FileAlign;
+         PartAttribute:=(PartAttribute or outputfile.SectionAttribute[i-1])
+         and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage);
+         if(ELFBool) and (outputfile.SectionAttribute[i-1]<>0) and
+         (StartAddress=outputfile.BaseAddress) and (StartOffset=0) then
           begin
            StartAddress:=outputfile.SectionAddress[i-1];
            StartOffset:=outputfile.SectionOffset[i-1];
@@ -4492,10 +4667,20 @@ begin
          if(outputfile.SectionAttribute[i-1]<>0) then
           begin
            EndAddress:=outputfile.SectionAddress[i-1]+outputfile.SectionSize[i-1];
-           EndOffset:=outputfile.SectionOffset[i-1]+outputfile.SectionSize[i-1];
+           if(outputfile.SectionAttribute[i-1] and unifile_attribute_not_in_file=0) then
+           EndOffset:=outputfile.SectionOffset[i-1]+outputfile.SectionSize[i-1]
+           else
+           EndOffset:=outputfile.SectionOffset[i-1];
           end;
-         if((i>1) and (outputfile.SectionAttribute[i-2]<>outputfile.SectionAttribute[i-1])
-         and (outputfile.SectionAttribute[i-2]<>0)) or (i=outputfile.SectionCount) then
+         if(i<outputfile.SectionCount) and
+         (outputfile.SectionAttribute[i-1] and
+         (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)<>outputfile.SectionAttribute[i]
+         and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)) and
+         (outputfile.SectionAttribute[i-1] and
+         (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)<>0)then
           begin
            Pelf64_program_header(Content+WritePointer)^.program_offset:=StartOffset;
            Pelf64_program_header(Content+WritePointer)^.program_physical_address:=StartAddress;
@@ -4521,7 +4706,21 @@ begin
            else
            Pelf64_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_load;
            inc(WritePointer,sizeof(elf64_program_header));
-           StartAddress:=0; StartOffset:=0;
+           StartAddress:=outputfile.BaseAddress;
+           StartOffset:=0; PartAttribute:=0; PartAlign:=0; ELFBool:=true;
+          end
+         else if(i<outputfile.SectionCount) and (outputfile.SectionAttribute[i-1] and
+         (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)<>outputfile.SectionAttribute[i]
+         and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage))
+         and (outputfile.SectionAttribute[i-1] and
+         (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+         or unifile_attribute_thread_local_storage)=0) then
+          begin
+           StartAddress:=outputfile.BaseAddress;
+           StartOffset:=0;
+           PartAttribute:=0; PartAlign:=0;
           end;
          if(outputfile.SectionName[i-1]='.interp') then
           begin
@@ -4536,6 +4735,7 @@ begin
            Pelf64_program_header(Content+WritePointer)^.program_align:=1;
            Pelf64_program_header(Content+WritePointer)^.program_virtual_address:=
            outputfile.SectionAddress[i-1];
+           Pelf64_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
            Pelf64_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_interp;
            inc(WritePointer,sizeof(elf64_program_header));
           end;
@@ -4552,23 +4752,26 @@ begin
            Pelf64_program_header(Content+WritePointer)^.program_align:=4;
            Pelf64_program_header(Content+WritePointer)^.program_virtual_address:=
            outputfile.SectionAddress[i-1];
+           Pelf64_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
            Pelf64_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_dynamic;
            inc(WritePointer,sizeof(elf64_program_header));
           end;
          inc(i);
         end;
-       if(basescript.NoExecutableStack) then
-        begin
-         Pelf64_program_header(Content+WritePointer)^.program_offset:=0;
-         Pelf64_program_header(Content+WritePointer)^.program_physical_address:=0;
-         Pelf64_program_header(Content+WritePointer)^.program_file_size:=0;
-         Pelf64_program_header(Content+WritePointer)^.program_memory_size:=0;
-         Pelf64_program_header(Content+WritePointer)^.program_align:=4;
-         Pelf64_program_header(Content+WritePointer)^.program_virtual_address:=0;
-         Pelf64_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_gnu_stack;
-         inc(WritePointer,sizeof(elf64_program_header));
-        end;
-       if(basescript.NoGotWritable) then
+       Pelf64_program_header(Content+WritePointer)^.program_offset:=0;
+       Pelf64_program_header(Content+WritePointer)^.program_physical_address:=0;
+       Pelf64_program_header(Content+WritePointer)^.program_file_size:=0;
+       Pelf64_program_header(Content+WritePointer)^.program_memory_size:=0;
+       Pelf64_program_header(Content+WritePointer)^.program_align:=8;
+       Pelf64_program_header(Content+WritePointer)^.program_virtual_address:=0;
+       Pelf64_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc
+       or elf_program_header_write;
+       if(basescript.NoExecutableStack=false) then
+       Pelf64_program_header(Content+WritePointer)^.program_flags:=
+       Pelf64_program_header(Content+WritePointer)^.program_flags or elf_program_header_execute;
+       Pelf64_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_gnu_stack;
+       inc(WritePointer,sizeof(elf64_program_header));
+       if(basescript.GotAuthority>0) and (outputfile.GotIndex>0) then
         begin
          Pelf64_program_header(Content+WritePointer)^.program_offset:=
          outputfile.SectionOffset[outputfile.GotIndex-1];
@@ -4578,12 +4781,16 @@ begin
          outputfile.SectionSize[outputfile.GotIndex-1];
          Pelf64_program_header(Content+WritePointer)^.program_memory_size:=
          outputfile.SectionSize[outputfile.GotIndex-1];
-         Pelf64_program_header(Content+WritePointer)^.program_align:=4;
+         Pelf64_program_header(Content+WritePointer)^.program_align:=8;
          Pelf64_program_header(Content+WritePointer)^.program_virtual_address:=
          outputfile.SectionAddress[outputfile.GotIndex-1];
+         Pelf64_program_header(Content+WritePointer)^.program_flags:=elf_program_header_alloc;
+         if(basescript.GotAuthority=1) then
+         Pelf64_program_header(Content+WritePointer)^.program_flags:=
+         Pelf64_program_header(Content+WritePointer)^.program_flags or elf_program_header_write;
          Pelf64_program_header(Content+WritePointer)^.program_type:=elf_program_header_type_gnu_relro;
          inc(WritePointer,sizeof(elf64_program_header));
-        end
+        end;
       end;
      i:=1; WritePointer2:=outputfile.FinalSectionOffset+sizeof(elf64_section_header);
      for i:=1 to outputfile.SectionCount do
@@ -4700,8 +4907,7 @@ begin
         begin
          Pelf64_section_header(Content+WritePointer2)^.section_header_link:=
          outputfile.DynamicStringTableIndex;
-         Pelf64_section_header(Content+WritePointer2)^.section_header_info:=
-         outputfile.DynamicSymbolTableLocalCount+1;
+         Pelf64_section_header(Content+WritePointer2)^.section_header_info:=1;
         end
        else if(outputfile.SectionName[i-1]='.symtab') then
         begin
@@ -5060,8 +5266,7 @@ procedure unifile_convert_file_to_final(var basefile:unifile_linked_file_stage;
 var basescript:unild_script;filename:string;fileclass:byte);
 var finalfile:unifile_file_final;
     {For Handle the file}
-    i,j,k,m,n,a,b,c:SizeUint;
-    FileResult:unifile_result;
+    i,j,k,m,n,a,b,c,d,e:SizeUint;
     tempstr1:string;
     InclineSwitch:boolean;
     {For ELF File}
@@ -5089,6 +5294,11 @@ var finalfile:unifile_file_final;
     SegmentCount:SizeUint;
     {For Base File Index to Final File Index}
     SectionIndex:array of word;
+    {For PE Relocation Only}
+    PEBaseAddress:SizeUint;
+    PERelocationSize:SizeUint;
+    {For Relocation Parameters}
+    OriginalAddress,GoalAddress:SizeUint;
     {For Relocation Only}
     ChangePointer:Pointer;
     ChangeValue:SizeInt;
@@ -5105,10 +5315,19 @@ var finalfile:unifile_file_final;
     {For Dynamic Library}
     NeedDynamicLibraryTotal:boolean=false;
     DynamicLibraryTotal:unifile_elf_dynamic_library_total;
+    {For GOT Address}
+    GotAddress:SizeUint;
+    GotProtect:byte=1;
+    {For Temporary Results}
+    FileValue:unifile_check_result;
+    FileResult:unifile_result;
+    FileList:unifile_check_needed_list;
 label SkipGot;
 begin
+ {Initialization of the software}
  DynamicBool:=false; GotBool:=false; GotPltOffset:=0;
  SectionStart:=0; SectionCount:=0; GotSymbolIndex:=0; DynamicSymbolIndex:=0;
+ finalfile.CoffSymbolTableContent:=nil; finalfile.CoffStringTableContent:=nil; FileList.NeedCount:=0;
  {Check the interpreter vaild}
  if(basescript.Interpreter<>'') then
  InterpreterInfo:=unifile_check_interpreter(basescript.Interpreter,basefile.Bits,basefile.Architecture,
@@ -5120,19 +5339,27 @@ begin
  finalfile.GotTableList.GotCount:=0; finalfile.GotTableList.GotCountOriginal:=0;
  finalfile.CoffListCount:=0; finalfile.CoffListSpecialize:=false; finalfile.RelocationIndex:=0;
  RelocatableFileRelaCount:=0;
- if(basescript.elfclass=unild_class_relocatable) then goto SkipGot;
+ if(fileclass=unifile_class_elf_file) and (basescript.elfclass=unild_class_relocatable) then goto SkipGot;
  {Then Check the Got Table}
  i:=1;
  while(i<=basefile.AdjustTable.Count)do
   begin
-   if(unifile_check_relocation(basefile.Architecture,basefile.Bits,
-   basefile.AdjustTable.AdjustType[i-1],basefile.AdjustTable.GoalSectionIndex[i-1]=0)) then
-   inc(finalfile.GotTableList.GotCountOriginal);
+   FileValue:=unifile_check_relocation(basefile.Architecture,basefile.Bits,
+   basefile.AdjustTable.AdjustType[i-1],basefile.AdjustTable.GoalSectionIndex[i-1]<>0);
+   if(FileValue.GotBool) then inc(finalfile.GotTableList.GotCountOriginal);
+   if((FileValue.NeedRelocationBits=finalfile.Bits) and (basescript.NoFixedAddress)
+   and(basefile.SectionAttribute[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]<>0) and
+   (fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable))
+   or((FileValue.NeedRelocationBits>0) and (fileclass=unifile_class_pe_file))
+   then inc(FileList.NeedCount);
    inc(i);
   end;
+ SetLength(FileList.NeedAddress,FileList.NeedCount);
+ SetLength(FileList.NeedBits,FileList.NeedCount);
  SetLength(finalfile.GotTableList.GotHashList,finalfile.GotTableList.GotCountOriginal);
  {Initialize the Original Got Table}
- finalfile.GotTableList.GotHashOriginal.BucketCount:=finalfile.GotTableList.GotCountOriginal*8 div 7;
+ finalfile.GotTableList.GotHashOriginal.BucketCount:=
+ unifile_hash_table_bucket_count(finalfile.GotTableList.GotCountOriginal);
  SetLength(finalfile.GotTableList.GotHashOriginal.BucketEnable,
  finalfile.GotTableList.GotHashOriginal.BucketCount+1);
  SetLength(finalfile.GotTableList.GotHashOriginal.BucketItem,
@@ -5150,8 +5377,9 @@ begin
  i:=1; k:=1; m:=1;
  while(i<=basefile.AdjustTable.Count)do
   begin
-   if(unifile_check_relocation(basefile.Architecture,basefile.Bits,
-   basefile.AdjustTable.AdjustType[i-1],basefile.AdjustTable.GoalSectionIndex[i-1]=0)) then
+   FileValue:=unifile_check_relocation(basefile.Architecture,basefile.Bits,
+   basefile.AdjustTable.AdjustType[i-1],basefile.AdjustTable.GoalSectionIndex[i-1]<>0);
+   if(FileValue.GotBool) then
     begin
      InclineSwitch:=false;
      j:=basefile.AdjustTable.AdjustHash[i-1] mod finalfile.GotTableList.GotHashOriginal.BucketCount+1;
@@ -5166,18 +5394,18 @@ begin
       begin
        k:=0;
        if(finalfile.GotTableList.GotHashOriginal.BucketHash[j]=basefile.AdjustTable.AdjustHash[i-1])
-       then inc(k);
+       then k:=1;
        j:=finalfile.GotTableList.GotHashOriginal.BucketItem[j];
        while(finalfile.GotTableList.GotHashOriginal.ChainEnable[j])do
         begin
          if(finalfile.GotTableList.GotHashOriginal.ChainHash[j]=basefile.AdjustTable.AdjustHash[i-1])
-         then inc(k);
+         then k:=1;
          j:=finalfile.GotTableList.GotHashOriginal.ChainItem[j];
         end;
+       if(k=0) then InclineSwitch:=true;
        finalfile.GotTableList.GotHashOriginal.ChainEnable[j]:=true;
        finalfile.GotTableList.GotHashOriginal.ChainItem[j]:=m;
        finalfile.GotTableList.GotHashOriginal.ChainHash[j]:=basefile.AdjustTable.AdjustHash[i-1];
-       if(k=0) then InclineSwitch:=true;
       end;
      if(InclineSwitch) then inc(finalfile.GotTableList.GotCount);
      finalfile.GotTableList.GotHashList[m-1]:=basefile.AdjustTable.AdjustHash[i-1];
@@ -5187,7 +5415,8 @@ begin
   end;
  SetLength(finalfile.GotTableList.GotEnable,finalfile.GotTableList.GotCountOriginal);
  {Initialize the GOT Table}
- finalfile.GotTableList.GotHashTable.BucketCount:=finalfile.GotTableList.GotCount*8 div 7;
+ finalfile.GotTableList.GotHashTable.BucketCount:=
+ unifile_hash_table_bucket_count(finalfile.GotTableList.GotCount);
  SetLength(finalfile.GotTableList.GotHashTable.BucketEnable,
  finalfile.GotTableList.GotHashTable.BucketCount+1);
  SetLength(finalfile.GotTableList.GotHashTable.BucketItem,
@@ -5234,6 +5463,7 @@ begin
   end;
  SetLength(finalfile.GotTableList.GotHashEnable,finalfile.GotTableList.GotCount);
  SkipGot:
+ if(finalfile.GotTableList.GotCount>0) then GotProtect:=0;
  {Then Generate the Sections Now}
  finalfile.DynamicIndex:=0; finalfile.DynamicStringTableIndex:=0;
  finalfile.InterpreterIndex:=0; finalfile.DynamicSymbolIndex:=0;
@@ -5289,7 +5519,8 @@ begin
      finalfile.InterpreterIndex:=j;
      inc(j);
     end;
-   if(i=1) and (fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable) then
+   if(i=1) and (fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable)
+   and(basescript.NoFixedAddress) then
     begin
      SetLength(finalfile.SectionName,j);
      finalfile.SectionName[j-1]:='.hash';
@@ -5302,9 +5533,7 @@ begin
      SetLength(finalfile.SectionContent,j);
      finalfile.SectionContent[j-1]:=nil;
      SetLength(finalfile.SectionSize,j);
-     finalfile.SectionSize[j-1]:=
-     ((finalfile.DynamicSymbolTable.SymbolCount+1)*2+1+finalfile.DynamicSymbolTable.SymbolCount+1+2)
-     *sizeof(dword);
+     finalfile.SectionSize[j-1]:=0;
      finalfile.SectionCount:=j;
      finalfile.HashTableIndex:=j;
      inc(j);
@@ -5312,7 +5541,7 @@ begin
    if(basefile.SectionVaild[i-1]) then
     begin
      SetLength(finalfile.SectionAlign,j);
-     if(basescript.Section[i-1].SectionAlign=0) or (basefile.SectionAlign[i-1]=0) then
+     if(basescript.Section[i-1].SectionAlign=0) and (basefile.SectionAlign[i-1]=0) then
       begin
        if(finalfile.Bits=32) then finalfile.SectionAlign[j-1]:=4 else finalfile.SectionAlign[j-1]:=8;
       end
@@ -5330,21 +5559,21 @@ begin
      else
      finalfile.SectionAddress[j-1]:=0;
      SetLength(finalfile.SectionSize,j);
-     finalfile.SectionSize[j-1]:=basefile.SectionSize[i-1];
+     finalfile.SectionSize[j-1]:=basefile.SectionContentInfo[i-1].ContentSize;
      SetLength(finalfile.SectionContent,j);
      finalfile.SectionContent[j-1]:=allocmem(finalfile.SectionSize[j-1]);
      SectionIndex[i-1]:=j;
-     if(basefile.SectionAttribute[i-1] and unifile_attribute_not_in_file<>unifile_attribute_not_in_file) then
+     if(basefile.SectionAttribute[i-1] and unifile_attribute_not_in_file=0) then
       begin
-       m:=1;
-       while(m<=basefile.SectionContent[i-1].Count)do
+       m:=1; e:=basefile.SectionContentInfo[i-1].ContentStartIndex;
+       while(m<=basefile.SectionContentInfo[i-1].ContentCount)do
         begin
-         if(basefile.SectionContent[i-1].ContentSize[m-1]>0) and
-         (basefile.SectionContent[i-1].Content[m-1]<>nil) then
+         if(basefile.SectionContent[e+m-2].Size>0) and
+         (basefile.SectionContent[e+m-2].Memory<>nil) then
           begin
-           Move(basefile.SectionContent[i-1].Content[m-1]^,
-           (finalfile.SectionContent[j-1]+basefile.SectionContent[i-1].ContentOffset[m-1])^,
-           basefile.SectionContent[i-1].ContentSize[m-1]);
+           Move(basefile.SectionContent[e+m-2].Memory^,
+           (finalfile.SectionContent[j-1]+basefile.SectionContent[e+m-2].Offset)^,
+           basefile.SectionContent[e+m-2].Size);
           end;
          inc(m);
         end;
@@ -5372,14 +5601,18 @@ begin
        inc(RelocatableFileRelaCount);
        inc(k);
       end;
-     if(finalfile.Bits=32) then
-     finalfile.SectionSize[j-1]:=RelocatableFileRelaCount*sizeof(elf32_rela)
-     else
-     finalfile.SectionSize[j-1]:=RelocatableFileRelaCount*sizeof(elf64_rela);
-     SetLength(finalfile.SectionContent,j+1);
-     finalfile.SectionContent[j-1]:=allocmem(finalfile.SectionSize[j-1]);
-     finalfile.SectionCount:=j;
-     inc(j);
+     if(RelocatableFileRelaCount>0) then
+      begin
+       if(finalfile.Bits=32) then
+       finalfile.SectionSize[j-1]:=RelocatableFileRelaCount*sizeof(elf32_rela)
+       else
+       finalfile.SectionSize[j-1]:=RelocatableFileRelaCount*sizeof(elf64_rela);
+       SetLength(finalfile.SectionContent,j+1);
+       finalfile.SectionContent[j-1]:=allocmem(finalfile.SectionSize[j-1]);
+       finalfile.SectionCount:=j;
+       inc(j);
+      end
+     else dec(j);
     end;
    if(a<=SegmentCount) and (i=SegmentIndex[a-1]) and (SegmentAlter[a-1]) then
     begin
@@ -5388,7 +5621,7 @@ begin
      and(basescript.elfclass<>unild_class_relocatable) and (basescript.NoFixedAddress) then
       begin
        DynamicBool:=true;
-       if(finalfile.GotTableList.GotCount>0) then
+       if(finalfile.GotTableList.GotCount>0) or (FileList.NeedCount>0) then
         begin
          finalfile.DynamicIndex:=j;
          if(basescript.DynamicSectionEnable) then
@@ -5441,23 +5674,23 @@ begin
          if(finalfile.Bits=32) then finalfile.SectionAlign[j-1]:=4 else finalfile.SectionAlign[j-1]:=8;
          finalfile.SectionAlign[j]:=1;
          if(finalfile.Bits=32) then finalfile.SectionAlign[j+1]:=4 else finalfile.SectionAlign[j+1]:=8;
-         SetLength(finalfile.SectionName,j+3);
+         SetLength(finalfile.SectionName,j+2);
          finalfile.SectionName[j-1]:='.dynamic';
          finalfile.SectionName[j]:='.dynstr';
          finalfile.SectionName[j+1]:='.dynsym';
-         SetLength(finalfile.SectionAttribute,j+3);
+         SetLength(finalfile.SectionAttribute,j+2);
          finalfile.SectionAttribute[j-1]:=unifile_attribute_alloc;
          finalfile.SectionAttribute[j]:=unifile_attribute_alloc;
          finalfile.SectionAttribute[j+1]:=unifile_attribute_alloc;
-         SetLength(finalfile.SectionAddress,j+3);
+         SetLength(finalfile.SectionAddress,j+2);
          finalfile.SectionAddress[j-1]:=0;
          finalfile.SectionAddress[j]:=0;
          finalfile.SectionAddress[j+1]:=0;
-         SetLength(finalfile.SectionContent,j+3);
+         SetLength(finalfile.SectionContent,j+2);
          finalfile.SectionContent[j-1]:=nil;
          finalfile.SectionContent[j]:=nil;
          finalfile.SectionContent[j+1]:=nil;
-         SetLength(finalfile.SectionSize,j+3);
+         SetLength(finalfile.SectionSize,j+2);
          finalfile.SectionSize[j-1]:=0;
          finalfile.SectionSize[j]:=0;
          finalfile.SectionSize[j+1]:=0;
@@ -5480,7 +5713,7 @@ begin
        SetLength(finalfile.SectionAddress,j+1);
        finalfile.SectionAddress[j-1]:=0;
        SetLength(finalfile.SectionSize,j+1);
-       if(finalfile.DynamicSymbolTable.SymbolCount>0) or (basescript.Interpreter<>'') then
+       if(basefile.ExternalNeeded) then
         begin
          if(finalfile.Bits=32) then
          finalfile.SectionSize[j-1]:=(finalfile.GotTableList.GotCount+3)*4
@@ -5499,7 +5732,7 @@ begin
        finalfile.SectionCount:=j;
        finalfile.GotIndex:=j;
        if(basescript.GlobalOffsetTableSectionEnable) then
-       SectionIndex[basefile.SectionCount+basescript.DynamicSectionIndex-1]:=j;
+       SectionIndex[basefile.SectionCount+basescript.GlobalOffsetTableSectionIndex-1]:=j;
        inc(j);
       end;
     end;
@@ -5578,7 +5811,7 @@ begin
         begin
          inc(n,8+k); inc(m);
         end;
-       n:=unifile_align(n,4);
+       if(FileList.NeedCount=0) then n:=unifile_align(n,4);
       end
      else
       begin
@@ -5591,7 +5824,7 @@ begin
         begin
          inc(n,8+k); inc(m);
         end;
-       n:=unifile_align(n,8);
+       if(FileList.NeedCount=0) then n:=unifile_align(n,8);
       end;
      SetLength(finalfile.CoffList,m);
      finalfile.CoffListCount:=m;
@@ -5622,7 +5855,7 @@ begin
         end;
        inc(b);
       end;
-     if(m=0) then
+     if(m=0) and (FileList.NeedCount=0) then
       begin
        finalfile.CoffListSpecialize:=true;
        n:=12;
@@ -5637,8 +5870,7 @@ begin
     end;
    inc(i);
   end;
- if(finalfile.DynamicSymbolTable.SymbolCount>0) or (basescript.Interpreter<>'')
- then GotPltOffset:=3;
+ if(basefile.ExternalNeeded) and (finalfile.GotTableList.GotCount>0) then GotPltOffset:=3;
  SetLength(finalfile.SectionOffset,finalfile.SectionCount);
  if(fileclass=unifile_class_elf_file) then
   begin
@@ -5727,131 +5959,31 @@ begin
   end;
  while(i<=basefile.SymbolTable.SymbolCount)do
   begin
-   if(basefile.SymbolTable.SymbolType[i-1]=0) then
+   if(basefile.SymbolTable.SymbolType[i-1]=elf_symbol_type_section) then
     begin
      inc(i); continue;
     end;
    if(basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file) then
     begin
      m:=1; n:=0;
-     while(m<=basefile.SectionCount)do
-      begin
-       if(basefile.SectionVaild[m-1]=false) then
-        begin
-         inc(m); continue;
-        end;
-       n:=unifile_search_for_hash_table(basefile.SectionContentAssist[m-1],
-       basefile.SymbolTable.SymbolSectionNameHash[i-1]);
-       if(n<>0) then break;
-       inc(m);
-      end;
+     n:=unifile_search_for_hash_table(basefile.SectionContentAssist,
+     basefile.SymbolTable.SymbolSectionNameHash[i-1]);
+     if(n=0) then m:=0 else m:=basefile.SectionContent[n-1].Index;
      inc(j);
-     if(m<=basefile.SectionCount) then
+     if(m<>0) then
       begin
        finalfile.SymbolTable.SymbolSectionIndex[j-1]:=SectionIndex[m-1];
        finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
        finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
        finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
-       if(basefile.SymbolTable.SymbolSize[i-1]=0) and
-       (basefile.SectionContent[m-1].ContentSizeGot[n-1]=false) then
-        begin
-         finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SectionContent[m-1].ContentSize[n-1];
-         basefile.SectionContent[m-1].ContentSizeGot[n-1]:=true;
-        end
-       else
        finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
        finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
-       finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[m-1].ContentOffset[n-1];
+       finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[n-1].Offset
+       +basefile.SymbolTable.SymbolValue[i-1];
        finalfile.SymbolTable.SymbolVisibility[j-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
       end
      else
       begin
-       finalfile.SymbolTable.SymbolSectionIndex[j-1]:=0;
-       finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
-       finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
-       finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
-       finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
-       finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
-       finalfile.SymbolTable.SymbolValue[j-1]:=0;
-       finalfile.SymbolTable.SymbolVisibility[j-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
-      end;
-    end
-   else if(basescript.elfclass=unild_class_sharedobject) then
-    begin
-     m:=1; n:=0;
-     while(m<=basefile.SectionCount)do
-      begin
-       if(basefile.SectionVaild[m-1]=false) then
-        begin
-         inc(m); continue;
-        end;
-       n:=unifile_search_for_hash_table(basefile.SectionContentAssist[m-1],
-       basefile.SymbolTable.SymbolSectionNameHash[i-1]);
-       if(n<>0) then break;
-       inc(m);
-      end;
-     inc(j);
-     if(m<=basefile.SectionCount) then
-      begin
-       if(basefile.SymbolTable.SymbolBinding[i-1]=elf_symbol_bind_global) then
-        begin
-         inc(k);
-         finalfile.DynamicSymbolTable.SymbolSectionIndex[k-1]:=SectionIndex[m-1];
-         finalfile.DynamicSymbolTable.SymbolName[k-1]:=basefile.SymbolTable.SymbolName[i-1];
-         finalfile.DynamicSymbolTable.SymbolNameHash[k-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
-         finalfile.DynamicSymbolTable.SymbolBinding[k-1]:=basefile.SymbolTable.SymbolBinding[i-1];
-         if(basefile.SymbolTable.SymbolSize[i-1]=0) and
-         (basefile.SectionContent[m-1].ContentSizeGot[n-1]=false) then
-          begin
-           finalfile.DynamicSymbolTable.SymbolSize[k-1]:=basefile.SectionContent[m-1].ContentSize[n-1];
-           basefile.SectionContent[m-1].ContentSizeGot[n-1]:=true;
-          end
-         else
-         finalfile.DynamicSymbolTable.SymbolSize[k-1]:=basefile.SymbolTable.SymbolSize[i-1];
-         finalfile.DynamicSymbolTable.SymbolType[k-1]:=basefile.SymbolTable.SymbolType[i-1];
-         finalfile.DynamicSymbolTable.SymbolValue[k-1]:=basefile.SectionContent[m-1].ContentOffset[n-1];
-         finalfile.DynamicSymbolTable.SymbolVisibility[k-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
-        end;
-       finalfile.SymbolTable.SymbolSectionIndex[j-1]:=SectionIndex[m-1];
-       finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
-       finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
-       finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
-       if(basefile.SymbolTable.SymbolBinding[i-1]=elf_symbol_bind_global) then
-        begin
-         if(basefile.SymbolTable.SymbolSize[i-1]=0) then
-         finalfile.SymbolTable.SymbolSize[j-1]:=finalfile.DynamicSymbolTable.SymbolSize[k-1]
-         else
-         finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
-        end
-       else
-        begin
-         if(basefile.SymbolTable.SymbolSize[i-1]=0) and
-         (basefile.SectionContent[m-1].ContentSizeGot[n-1]=false) then
-          begin
-           finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SectionContent[m-1].ContentSize[n-1];
-           basefile.SectionContent[m-1].ContentSizeGot[n-1]:=true;
-          end
-         else
-         finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
-        end;
-       finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
-       finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[m-1].ContentOffset[n-1];
-       finalfile.SymbolTable.SymbolVisibility[j-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
-      end
-     else
-      begin
-       if(basefile.SymbolTable.SymbolBinding[i-1]=elf_symbol_bind_global) then
-        begin
-         inc(k);
-         NeedDynamicLibraryTotal:=true;
-         finalfile.DynamicSymbolTable.SymbolSectionIndex[k-1]:=0;
-         finalfile.DynamicSymbolTable.SymbolName[k-1]:=basefile.SymbolTable.SymbolName[i-1];
-         finalfile.DynamicSymbolTable.SymbolBinding[k-1]:=basefile.SymbolTable.SymbolBinding[i-1];
-         finalfile.DynamicSymbolTable.SymbolSize[k-1]:=0;
-         finalfile.DynamicSymbolTable.SymbolType[k-1]:=basefile.SymbolTable.SymbolType[i-1];
-         finalfile.DynamicSymbolTable.SymbolValue[k-1]:=0;
-         finalfile.DynamicSymbolTable.SymbolVisibility[k-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
-        end;
        finalfile.SymbolTable.SymbolSectionIndex[j-1]:=0;
        finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
        finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
@@ -5866,53 +5998,97 @@ begin
     begin
      if(fileclass=unifile_class_pe_file) then
       begin
-       writeln('ERROR: Symbol '+basefile.SymbolTable.SymbolName[i-1]+' not found in efi file structure.');
+       writeln('ERROR: Symbol '+basefile.SymbolTable.SymbolName[i-1]+' not found in EFI file structure.');
+       readln;
+       halt;
+      end
+     else if(fileclass=unifile_class_elf_file) and
+     (basescript.NoFixedAddress=false) and (basescript.elfclass=unild_class_executable) then
+      begin
+       writeln('ERROR: Symbol '+basefile.SymbolTable.SymbolName[i-1]+' not found in ELF'+
+       ' format executable in Fixed Address.');
        readln;
        halt;
       end;
-     inc(k);
+     inc(k); inc(j);
      NeedDynamicLibraryTotal:=true;
      finalfile.DynamicSymbolTable.SymbolSectionIndex[k-1]:=0;
      finalfile.DynamicSymbolTable.SymbolName[k-1]:=basefile.SymbolTable.SymbolName[i-1];
+     finalfile.DynamicSymbolTable.SymbolNameHash[k-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
      finalfile.DynamicSymbolTable.SymbolBinding[k-1]:=basefile.SymbolTable.SymbolBinding[i-1];
      finalfile.DynamicSymbolTable.SymbolSize[k-1]:=0;
      finalfile.DynamicSymbolTable.SymbolType[k-1]:=basefile.SymbolTable.SymbolType[i-1];
      finalfile.DynamicSymbolTable.SymbolValue[k-1]:=0;
      finalfile.DynamicSymbolTable.SymbolVisibility[k-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
+     finalfile.SymbolTable.SymbolSectionIndex[j-1]:=0;
+     finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
+     finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
+     finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
+     finalfile.SymbolTable.SymbolSize[j-1]:=0;
+     finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
+     finalfile.SymbolTable.SymbolValue[j-1]:=0;
+     finalfile.SymbolTable.SymbolVisibility[j-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
     end
-   else
+   else if(basescript.elfclass=unild_class_sharedobject) then
     begin
-     m:=1; n:=0;
-     while(m<=basefile.SectionCount)do
-      begin
-       if(basefile.SectionVaild[m-1]=false) then
-        begin
-         inc(m); continue;
-        end;
-       n:=unifile_search_for_hash_table(basefile.SectionContentAssist[m-1],
-       basefile.SymbolTable.SymbolSectionNameHash[i-1]);
-       if(n<>0) then break;
-       inc(m);
-      end;
-     if(m<=basefile.SectionCount) then inc(j)
-     else
+     n:=unifile_search_for_hash_table(basefile.SectionContentAssist,
+     basefile.SymbolTable.SymbolSectionNameHash[i-1]);
+     if(n=0) then
       begin
        inc(i); continue;
       end;
+     m:=basefile.SectionContent[n-1].Index;
+     if(m<>0) then
+      begin
+       if(basefile.SymbolTable.SymbolBinding[i-1]=elf_symbol_bind_global) then
+        begin
+         inc(k);
+         finalfile.DynamicSymbolTable.SymbolSectionIndex[k-1]:=SectionIndex[m-1];
+         finalfile.DynamicSymbolTable.SymbolName[k-1]:=basefile.SymbolTable.SymbolName[i-1];
+         finalfile.DynamicSymbolTable.SymbolNameHash[k-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
+         finalfile.DynamicSymbolTable.SymbolBinding[k-1]:=basefile.SymbolTable.SymbolBinding[i-1];
+         finalfile.DynamicSymbolTable.SymbolSize[k-1]:=basefile.SymbolTable.SymbolSize[i-1];
+         finalfile.DynamicSymbolTable.SymbolType[k-1]:=basefile.SymbolTable.SymbolType[i-1];
+         finalfile.DynamicSymbolTable.SymbolValue[k-1]:=basefile.SectionContent[n-1].Offset
+         +basefile.SymbolTable.SymbolValue[i-1];
+         finalfile.DynamicSymbolTable.SymbolVisibility[k-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
+        end;
+       inc(j);
+       finalfile.SymbolTable.SymbolSectionIndex[j-1]:=SectionIndex[m-1];
+       finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
+       finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
+       finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
+       finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
+       finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
+       finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[n-1].Offset
+       +basefile.SymbolTable.SymbolValue[i-1];
+       finalfile.SymbolTable.SymbolVisibility[j-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
+      end
+     else
+      begin
+       writeln('ERROR:Symbol '+basefile.SymbolTable.SymbolName[i-1]+' is invaild.');
+       readln;
+       halt;
+      end;
+    end
+   else
+    begin
+     m:=1; n:=unifile_search_for_hash_table(basefile.SectionContentAssist,
+     basefile.SymbolTable.SymbolSectionNameHash[i-1]);
+     if(n=0) then
+      begin
+       inc(i); continue;
+      end;
+     m:=basefile.SectionContent[n-1].Index;
+     inc(j);
      finalfile.SymbolTable.SymbolSectionIndex[j-1]:=SectionIndex[m-1];
      finalfile.SymbolTable.SymbolName[j-1]:=basefile.SymbolTable.SymbolName[i-1];
      finalfile.SymbolTable.SymbolNameHash[j-1]:=basefile.SymbolTable.SymbolNameHash[i-1];
      finalfile.SymbolTable.SymbolBinding[j-1]:=basefile.SymbolTable.SymbolBinding[i-1];
-     if(basefile.SymbolTable.SymbolSize[i-1]=0) and
-     (basefile.SectionContent[m-1].ContentSizeGot[n-1]=false) then
-      begin
-       finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SectionContent[m-1].ContentSize[n-1];
-       basefile.SectionContent[m-1].ContentSizeGot[n-1]:=true;
-      end
-     else
      finalfile.SymbolTable.SymbolSize[j-1]:=basefile.SymbolTable.SymbolSize[i-1];
      finalfile.SymbolTable.SymbolType[j-1]:=basefile.SymbolTable.SymbolType[i-1];
-     finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[m-1].ContentOffset[n-1];
+     finalfile.SymbolTable.SymbolValue[j-1]:=basefile.SectionContent[n-1].Offset
+     +basefile.SymbolTable.SymbolValue[i-1];
      finalfile.SymbolTable.SymbolVisibility[j-1]:=basefile.SymbolTable.SymbolVisibility[i-1];
     end;
    inc(i);
@@ -5940,9 +6116,10 @@ begin
     end;
   end;
  finalfile.SymbolTable.SymbolCount:=j; finalfile.DynamicSymbolTable.SymbolCount:=k;
- finalfile.SymbolTableLocalCount:=0; finalfile.DynamicSymbolTableLocalCount:=0;
+ finalfile.SymbolTableLocalCount:=0;
  {Then Generate the Symbol Table Assist}
- finalfile.SymbolTableAssist.BucketCount:=finalfile.SymbolTable.SymbolCount*8 div 7;
+ finalfile.SymbolTableAssist.BucketCount:=
+ unifile_hash_table_bucket_count(finalfile.SymbolTable.SymbolCount);
  SetLength(finalfile.SymbolTableAssist.BucketEnable,finalfile.SymbolTableAssist.BucketCount+1);
  SetLength(finalfile.SymbolTableAssist.BucketHash,finalfile.SymbolTableAssist.BucketCount+1);
  SetLength(finalfile.SymbolTableAssist.BucketItem,finalfile.SymbolTableAssist.BucketCount+1);
@@ -5961,7 +6138,7 @@ begin
    if(finalfile.SymbolTableAssist.BucketEnable[j]=false) then
     begin
      finalfile.SymbolTableAssist.BucketEnable[j]:=true;
-     finalfile.SymbolTableAssist.BucketHash[j]:=finalfile.SymbolTable.SymbolNameHash[j-1];
+     finalfile.SymbolTableAssist.BucketHash[j]:=finalfile.SymbolTable.SymbolNameHash[i-1];
      finalfile.SymbolTableAssist.BucketItem[j]:=i;
     end
    else
@@ -5969,7 +6146,7 @@ begin
      j:=finalfile.SymbolTableAssist.BucketItem[j];
      while(finalfile.SymbolTableAssist.ChainEnable[j])do j:=finalfile.SymbolTableAssist.ChainItem[j];
      finalfile.SymbolTableAssist.ChainEnable[j]:=true;
-     finalfile.SymbolTableAssist.ChainHash[j]:=finalfile.SymbolTable.SymbolNameHash[j-1];
+     finalfile.SymbolTableAssist.ChainHash[j]:=finalfile.SymbolTable.SymbolNameHash[i-1];
      finalfile.SymbolTableAssist.ChainItem[j]:=i;
     end;
    inc(i);
@@ -5987,7 +6164,8 @@ begin
    unifile_elf_dynamic_library_total_generate_hash_table(DynamicLibraryTotal);
   end;
  {Then Generate the Dynamic Symbol Table Assist}
- finalfile.DynamicSymbolTableAssist.BucketCount:=finalfile.DynamicSymbolTable.SymbolCount*8 div 7;
+ finalfile.DynamicSymbolTableAssist.BucketCount:=
+ unifile_hash_table_bucket_count(finalfile.DynamicSymbolTable.SymbolCount);
  SetLength(finalfile.DynamicSymbolTableAssist.BucketEnable,finalfile.DynamicSymbolTableAssist.BucketCount+1);
  SetLength(finalfile.DynamicSymbolTableAssist.BucketHash,finalfile.DynamicSymbolTableAssist.BucketCount+1);
  SetLength(finalfile.DynamicSymbolTableAssist.BucketItem,finalfile.DynamicSymbolTableAssist.BucketCount+1);
@@ -6000,8 +6178,6 @@ begin
  while(i<=finalfile.DynamicSymbolTable.SymbolCount)do
   begin
    finalfile.DynamicSymbolTableNewIndex[i-1]:=i;
-   if(finalfile.DynamicSymbolTable.SymbolBinding[i-1]=elf_symbol_bind_local) then
-   inc(finalfile.SymbolTableLocalCount);
    if(finalfile.DynamicSymbolTable.SymbolSectionIndex[i-1]=0) and
    (unifile_elf_dynamic_library_total_search_for_hash_table(DynamicLibraryTotal,
    finalfile.DynamicSymbolTable.SymbolNameHash[i-1])=false) then
@@ -6015,7 +6191,7 @@ begin
    if(finalfile.DynamicSymbolTableAssist.BucketEnable[j]=false) then
     begin
      finalfile.DynamicSymbolTableAssist.BucketEnable[j]:=true;
-     finalfile.DynamicSymbolTableAssist.BucketHash[j]:=finalfile.DynamicSymbolTable.SymbolNameHash[j-1];
+     finalfile.DynamicSymbolTableAssist.BucketHash[j]:=finalfile.DynamicSymbolTable.SymbolNameHash[i-1];
      finalfile.DynamicSymbolTableAssist.BucketItem[j]:=i;
     end
    else
@@ -6024,7 +6200,7 @@ begin
      while(finalfile.DynamicSymbolTableAssist.ChainEnable[j])do
      j:=finalfile.DynamicSymbolTableAssist.ChainItem[j];
      finalfile.DynamicSymbolTableAssist.ChainEnable[j]:=true;
-     finalfile.DynamicSymbolTableAssist.ChainHash[j]:=finalfile.DynamicSymbolTable.SymbolNameHash[j-1];
+     finalfile.DynamicSymbolTableAssist.ChainHash[j]:=finalfile.DynamicSymbolTable.SymbolNameHash[i-1];
      finalfile.DynamicSymbolTableAssist.ChainItem[j]:=i;
     end;
    inc(i);
@@ -6038,6 +6214,31 @@ begin
  if(finalfile.DynamicSymbolTable.SymbolCount>0) then
  unifile_quick_sort(finalfile.DynamicSymbolTable,
  finalfile.DynamicSymbolTableNewIndex,1,finalfile.DynamicSymbolTable.SymbolCount);
+ {If Hash Table exists,set the Hash Table Empty Section}
+ if(finalfile.HashTableIndex>0) then
+  begin
+   finalfile.SectionSize[finalfile.HashTableIndex-1]:=
+   ((finalfile.DynamicSymbolTable.SymbolCount+1)*3+3)*sizeof(dword);
+  end;
+ {Then Obtain Implicit Section Addresses}
+ if(basescript.ImplicitCount>0) then
+  begin
+   for i:=1 to finalfile.SectionCount do
+    begin
+     j:=1;
+     while(j<=basescript.ImplicitCount)do
+      begin
+       if(basescript.ImplicitName[j-1]='') and
+       (basescript.ImplicitName[j-1]=finalfile.SectionName[i-1]) then
+        begin
+         finalfile.SectionAddress[i-1]:=basescript.ImplicitAddress[j-1];
+         basescript.ImplicitName[j-1]:='';
+         break;
+        end;
+       inc(j);
+      end;
+    end;
+  end;
  {Then Generate the Dynamic Table}
  DynamicCount:=0;
  InitialBool:=false; InitialArrayBool:=false; SymbolVersionBool:=false;
@@ -6064,7 +6265,8 @@ begin
      SetLength(finalfile.DynamicList.DynamicSubType,DynamicCount);
      finalfile.DynamicList.DynamicSubType[DynamicCount-1]:=0;
      SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
-     finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicString:=basescript.DynamicLibrary[j-1];
+     finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicString:=
+     ExtractFileName(basescript.DynamicLibrary[j-1]);
     end;
    if(basescript.DynamicPathCount>0) then
     begin
@@ -6270,8 +6472,11 @@ begin
    finalfile.DynamicList.DynamicSubType[DynamicCount-1]:=0;
    SetLength(finalfile.DynamicList.DynamicItem,DynamicCount);
    finalfile.DynamicList.DynamicItem[DynamicCount-2].DynamicValue:=0;
-   finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue:=elf_dynamic_flag_1_pie;
-   if(basescript.NoDefaultLibrary=false) then
+   if(basescript.NoFixedAddress) and (basescript.elfclass=unild_class_executable) then
+   finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue:=elf_dynamic_flag_1_pie
+   else
+   finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue:=0;
+   if(basescript.NoDefaultLibrary) then
     begin
      finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue:=
      finalfile.DynamicList.DynamicItem[DynamicCount-1].DynamicValue or elf_dynamic_flag_1_nodeflib;
@@ -6308,13 +6513,13 @@ begin
    finalfile.SectionSize[finalfile.DynamicSymbolIndex-1]:=
    (finalfile.DynamicSymbolTable.SymbolCount+1)*sizeof(elf64_symbol_table_entry);
    finalfile.SectionContent[finalfile.DynamicSymbolIndex-1]:=
-   getmem(finalfile.SectionSize[finalfile.DynamicSymbolIndex-1]);
+   allocmem(finalfile.SectionSize[finalfile.DynamicSymbolIndex-1]);
    for i:=1 to finalfile.DynamicSymbolTable.SymbolCount do
     begin
      inc(DynamicStringTableSize,length(finalfile.DynamicSymbolTable.SymbolName[i-1])+1);
     end;
    finalfile.SectionSize[finalfile.DynamicStringTableIndex-1]:=DynamicStringTableSize;
-   finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]:=getmem(DynamicStringTableSize);
+   finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]:=allocmem(DynamicStringTableSize);
   end;
  {For Generate the empty symbol Table and String Table}
  if(fileclass=unifile_class_elf_file) and (basescript.NoSymbol=false) then
@@ -6326,15 +6531,17 @@ begin
    finalfile.SectionSize[finalfile.SymbolTableIndex-1]:=
    (finalfile.SymbolTable.SymbolCount+1)*sizeof(elf64_symbol_table_entry);
    finalfile.SectionContent[finalfile.SymbolTableIndex-1]:=
-   getmem(finalfile.SectionSize[finalfile.SymbolTableIndex-1]);
+   allocmem(finalfile.SectionSize[finalfile.SymbolTableIndex-1]);
    StringTableSize:=1;
    for i:=1 to finalfile.SymbolTable.SymbolCount do
     begin
+     if(finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]<>
+     elf_symbol_type_section) then
      inc(StringTableSize,length(finalfile.SymbolTable.SymbolName[
      finalfile.SymbolTableNewIndex[i-1]-1])+1);
     end;
    finalfile.SectionSize[finalfile.SymbolStringTableIndex-1]:=StringTableSize;
-   finalfile.SectionContent[finalfile.SymbolStringTableIndex-1]:=getmem(StringTableSize);
+   finalfile.SectionContent[finalfile.SymbolStringTableIndex-1]:=allocmem(StringTableSize);
   end;
  if(fileclass=unifile_class_elf_file) then
   begin
@@ -6344,7 +6551,7 @@ begin
      inc(StringTableSize,length(finalfile.SectionName[i-1])+1);
     end;
    finalfile.SectionSize[finalfile.StringTableIndex-1]:=StringTableSize;
-   finalfile.SectionContent[finalfile.StringTableIndex-1]:=getmem(StringTableSize);
+   finalfile.SectionContent[finalfile.StringTableIndex-1]:=allocmem(StringTableSize);
   end;
  {For Generate the empty .rela.dyn section}
  if(finalfile.RelocationDynamicTableIndex<>0) then
@@ -6352,14 +6559,14 @@ begin
    if(finalfile.Bits=32) then
     begin
      finalfile.SectionSize[finalfile.RelocationDynamicTableIndex-1]:=sizeof(elf32_rela)*
-     (finalfile.GotTableList.GotCount+GotPltOffset);
+     (finalfile.GotTableList.GotCount+GotPltOffset+FileList.NeedCount);
      finalfile.SectionContent[finalfile.RelocationDynamicTableIndex-1]:=
      allocmem(finalfile.SectionSize[finalfile.RelocationDynamicTableIndex-1]);
     end
    else
     begin
      finalfile.SectionSize[finalfile.RelocationDynamicTableIndex-1]:=sizeof(elf64_rela)*
-     (finalfile.GotTableList.GotCount+GotPltOffset);
+     (finalfile.GotTableList.GotCount+GotPltOffset+FileList.NeedCount);
      finalfile.SectionContent[finalfile.RelocationDynamicTableIndex-1]:=
      allocmem(finalfile.SectionSize[finalfile.RelocationDynamicTableIndex-1]);
     end;
@@ -6368,25 +6575,25 @@ begin
  StartOffset:=0; ProgramHeaderCount:=0;
  if(fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable) then
   begin
-   if(basescript.NoExecutableStack) then inc(ProgramHeaderCount);
-   if(basescript.NoGotWritable) and (finalfile.GotIndex>0) then inc(ProgramHeaderCount);
+   ProgramHeaderCount:=2;
+   if(basescript.GotAuthority>0) and (finalfile.GotIndex>0) then inc(ProgramHeaderCount);
    if(finalfile.Bits=32) then
     begin
      inc(StartOffset,sizeof(elf32_header));
      for i:=1 to finalfile.SectionCount do
       begin
-       if(finalfile.SectionAttribute[i-1]=0) then
-        begin
-         if(i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]) then
-         inc(ProgramHeaderCount);
-         continue;
-        end;
-       if(i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])
-       and (finalfile.SectionAttribute[i-2]=0) then continue;
+       if(i<finalfile.SectionCount) and (
+       finalfile.SectionAttribute[i-1] and
+       (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+       or unifile_attribute_thread_local_storage)<>
+       finalfile.SectionAttribute[i] and
+       (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+       or unifile_attribute_thread_local_storage))
+       and(finalfile.SectionAttribute[i-1] and
+       (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+       or unifile_attribute_thread_local_storage)<>0) then inc(ProgramHeaderCount);
        if(finalfile.SectionName[i-1]='.dynamic') then inc(ProgramHeaderCount);
        if(finalfile.SectionName[i-1]='.interp') then inc(ProgramHeaderCount);
-       if((i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])) or
-       (i=finalfile.SectionCount) then inc(ProgramHeaderCount);
       end;
      finalfile.FileStartAddress:=StartOffset+ProgramHeaderCount*sizeof(elf32_program_header);
     end
@@ -6395,18 +6602,18 @@ begin
      inc(StartOffset,sizeof(elf64_header));
      for i:=1 to finalfile.SectionCount do
       begin
-       if(finalfile.SectionAttribute[i-1]=0) then
-        begin
-         if(finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1]) then
-         inc(ProgramHeaderCount);
-         continue;
-        end;
-       if(i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])
-       and (finalfile.SectionAttribute[i-2]=0) then continue;
+       if(i<finalfile.SectionCount) and (
+       finalfile.SectionAttribute[i-1] and
+       (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+       or unifile_attribute_thread_local_storage)<>
+       finalfile.SectionAttribute[i] and
+       (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+       or unifile_attribute_thread_local_storage))
+       and(finalfile.SectionAttribute[i-1] and
+       (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+       or unifile_attribute_thread_local_storage)<>0) then inc(ProgramHeaderCount);
        if(finalfile.SectionName[i-1]='.dynamic') then inc(ProgramHeaderCount);
        if(finalfile.SectionName[i-1]='.interp') then inc(ProgramHeaderCount);
-       if((i>1) and (finalfile.SectionAttribute[i-2]<>finalfile.SectionAttribute[i-1])) or
-       (i=finalfile.SectionCount) then inc(ProgramHeaderCount);
       end;
      finalfile.FileStartAddress:=StartOffset+ProgramHeaderCount*sizeof(elf64_program_header);
     end;
@@ -6438,6 +6645,8 @@ begin
  if(basescript.BaseAddress<>0) and (not (basescript.elfclass=unild_class_relocatable)
  and (fileclass=unifile_class_elf_file)) then
  Address:=basescript.BaseAddress+finalfile.FileStartAddress else Address:=finalfile.FileStartAddress;
+ if(basescript.BaseAddress<>0) then
+ finalfile.BaseAddress:=basescript.BaseAddress;
  if(basescript.IsUntypedBinary) and (basescript.UntypedBinaryAddressable) then Offset:=Address
  else Offset:=finalfile.FileStartAddress;
  if(fileclass=unifile_class_pe_file) then
@@ -6448,14 +6657,18 @@ begin
   end;
  if(fileclass<>unifile_class_binary_file) then
   begin
-   if(FileClass=unifile_class_pe_file) and (basescript.FileAlign<>0) then
    finalfile.FileAlign:=basescript.FileAlign; j:=1;
    for i:=1 to finalfile.SectionCount do
     begin
-     if(FileClass=unifile_class_pe_file) and (basescript.FileAlign<>0) then
+     if(FileClass=unifile_class_pe_file) or
+     ((i>1) and (finalfile.SectionAttribute[i-2]
+      and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+      or unifile_attribute_thread_local_storage)<>finalfile.SectionAttribute[i-1]
+      and (unifile_attribute_alloc or unifile_attribute_execute or unifile_attribute_write
+      or unifile_attribute_thread_local_storage))) then
       begin
-       Address:=unifile_align(Address,basescript.FileAlign);
-       Offset:=unifile_align(Offset,basescript.FileAlign);
+       Address:=unifile_align(Address,FinalFile.FileAlign);
+       Offset:=unifile_align(Offset,FinalFile.FileAlign);
       end
      else
       begin
@@ -6463,7 +6676,9 @@ begin
        Offset:=unifile_align(Offset,finalfile.SectionAlign[i-1]);
       end;
      if(finalfile.SectionAddress[i-1]<=Address) and (finalfile.SectionAttribute[i-1]<>0)
-     then finalfile.SectionAddress[i-1]:=Address;
+     then finalfile.SectionAddress[i-1]:=Address
+     else if(finalfile.SectionAttribute[i-1]<>0) then
+     Address:=finalfile.SectionAddress[i-1];
      finalfile.SectionOffset[i-1]:=Offset;
      if(fileclass=unifile_class_pe_file) and (finalfile.SectionAttribute[i-1] and
      (unifile_attribute_alloc or unifile_attribute_execute)=
@@ -6506,22 +6721,24 @@ begin
        Address:=unifile_align(Address,basescript.UntypedBinaryAlign);
        Offset:=unifile_align(Offset,basescript.UntypedBinaryAlign);
       end;
-     finalfile.SectionAddress[i-1]:=Address;
-     finalfile.SectionOffset[i-1]:=Offset;
+     if(basescript.UntypedBinaryAddressable) then
+      begin
+       if(finalfile.SectionAddress[i-1]<=Address) then finalfile.SectionAddress[i-1]:=Address
+       else Address:=finalfile.SectionAddress[i-1];
+       Offset:=Address;
+       finalfile.SectionOffset[i-1]:=Address;
+      end
+     else
+      begin
+       if(finalfile.SectionAddress[i-1]<=Address) then finalfile.SectionAddress[i-1]:=Address
+       else Address:=finalfile.SectionAddress[i-1];
+       finalfile.SectionOffset[i-1]:=Offset;
+      end;
      inc(Address,finalfile.SectionSize[i-1]);
      inc(Offset,finalfile.SectionSize[i-1]);
     end;
   end;
- {Get the Section Address and Size of the Section Symbol}
- if(not ((basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file)))
- and(basescript.EnableSectionInformation) then
-  begin
-   for i:=SectionStart to SectionStart+SectionCount-1 do
-    begin
-     finalfile.SymbolTable.SymbolValue[i-1]:=finalfile.SectionAddress[i-SectionStart];
-     finalfile.SymbolTable.SymbolSize[i-1]:=finalfile.SectionSize[i-SectionStart];
-    end;
-  end;
+ {Get the Section Address and Size of the .got or .dynamic Symbol if specified}
  if(not ((basescript.elfclass=unild_class_relocatable) and (fileclass=unifile_class_elf_file))) and
  (basescript.GlobalOffsetTableSectionEnable) and (finalfile.GotIndex>0) then
   begin
@@ -6553,8 +6770,8 @@ begin
      inc(i);
     end;
    finalfile.CoffSymbolTableSize:=sizeof(coff_symbol_table_item)*finalfile.SymbolTable.SymbolCount;
-   finalfile.CoffStringTableContent:=getmem(finalfile.CoffStringTableSize);
-   finalfile.CoffSymbolTableContent:=getmem(finalfile.CoffSymbolTableSize);
+   finalfile.CoffStringTableContent:=allocmem(finalfile.CoffStringTableSize);
+   finalfile.CoffSymbolTableContent:=allocmem(finalfile.CoffSymbolTableSize);
    Pdword(finalfile.CoffStringTableContent)^:=finalfile.CoffStringTableSize;
    i:=1; j:=4; m:=1; n:=1;
    while(i<=finalfile.SymbolTable.SymbolCount)do
@@ -6667,8 +6884,17 @@ begin
  RelocationSwitch:=true;
  FileResult.AdjustValue:=0; FileResult.RiscvType:=0; FileResult.Bits:=0;
  FileResult.GotType:=0; FileResult.SpecialBool:=false;
+ if(finalfile.GotTableList.GotCount>0) then
+ GotAddress:=finalfile.SectionAddress[finalfile.GotIndex-1] else GotAddress:=0;
  for i:=1 to basefile.AdjustTable.Count do
   begin
+   OriginalAddress:=finalfile.SectionAddress
+   [SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]+
+   basefile.AdjustTable.OriginalOffset[i-1];
+   if(basefile.AdjustTable.GoalSectionIndex[i-1]<>0) then
+   GoalAddress:=finalfile.SectionAddress[
+   SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]+basefile.AdjustTable.GoalOffset[i-1]
+   else GoalAddress:=0;
    if(finalfile.Architecture=elf_machine_386) then
     begin
      {Data Sequence:S,A,B,P,L,GOT,G}
@@ -6701,20 +6927,17 @@ begin
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got_plt,
        [0,basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1],(GotInternalIndex+2)*4],false);
+       OriginalAddress,OriginalAddress,GotAddress,(GotInternalIndex+2)*4],false);
        n:=unifile_search_for_hash_table(finalfile.DynamicSymbolTableAssist,
        basefile.AdjustTable.AdjustHash[i-1]);
-       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
+       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false)
+       and(finalfile.RelocationDynamicTableIndex<>0)then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
          Pelf32_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-         finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*4;
+         GotAddress+(GotInternalIndex+2)*4;
          Pelf32_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf32_rela))^.Addend:=
@@ -6732,41 +6955,35 @@ begin
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[finalfile.GotIndex+GotPltOffset-1],(GotInternalIndex+GotPltOffset-1)*4]);
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],0,
+       OriginalAddress,OriginalAddress,
+       GotAddress,(GotInternalIndex+GotPltOffset+GotProtect-1)*4]);
        if(FileResult.GotType<>0) and
        (GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
-         if(fileclass<>unifile_class_pe_file) then
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0) then
           begin
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4;
+           GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4;
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+           GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_i386_relative);
            inc(AllSectionOffset[finalfile.RelocationDynamicTableIndex-1]);
            inc(j);
           end
-         else
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
           begin
            if(m=1) then
             begin
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress;
              finalfile.CoffList[k-1].Item[m-1].Offset:=0;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_highlow;
@@ -6775,7 +6992,7 @@ begin
            else
             begin
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_highlow;
              inc(m);
@@ -6785,9 +7002,34 @@ begin
               end;
             end;
           end;
-         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+
+         (GotInternalIndex+GotPltOffset+GotProtect-1)*4)^:=GoalAddress
+         +basefile.AdjustTable.AdjustAddend[i-1];
+        end
+       else if(FileResult.ConvertToRelocationBits>0) and (FileList.NeedCount>0)
+       and(basefile.SectionAttribute[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]<>0) then
+        begin
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0)
+         and(FileResult.ConvertToRelocationBits=finalfile.Bits) then
+          begin
+           Pelf32_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf32_rela))^.Offset:=OriginalAddress;
+           Pelf32_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf32_rela))^.Addend:=
+           GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+           Pelf32_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_i386_relative);
+           inc(j);
+          end
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
+          begin
+           FileList.NeedBits[j-1]:=FileResult.ConvertToRelocationBits;
+           FileList.NeedAddress[j-1]:=OriginalAddress;
+           inc(j);
+          end;
         end;
       end;
      ChangePointer:=
@@ -6848,24 +7090,19 @@ begin
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got_plt,
        [0,basefile.AdjustTable.AdjustAddend[i-1],0,Byte(basefile.AdjustTable.AdjustFunc[i-1]),
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*4]);
+       OriginalAddress,OriginalAddress,OriginalAddress,GotAddress,
+       GotAddress+(GotInternalIndex+2)*4]);
        n:=unifile_search_for_hash_table(finalfile.DynamicSymbolTableAssist,
        basefile.AdjustTable.AdjustHash[i-1]);
-       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
+       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false)
+       and(finalfile.RelocationDynamicTableIndex<>0)then
         begin
          j:=AllSectionOffset[finalfile.RelocationDynamicTableIndex-1];
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
          Pelf32_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-         finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*4;
+         GotAddress+(GotInternalIndex+2)*4;
          Pelf32_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf32_rela))^.Addend:=
@@ -6883,44 +7120,36 @@ begin
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],0,
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],0,
        Byte(basefile.AdjustTable.AdjustFunc[i-1]),
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4]);
+       OriginalAddress,OriginalAddress,GoalAddress,GotAddress,
+       GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4]);
        if(FileResult.GotType<>0) and
        (GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
-         if(fileclass<>unifile_class_pe_file) then
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0)
+         and(FileResult.ConvertToRelocationBits=finalfile.Bits) then
           begin
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4;
+           GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4;
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+           GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
-           ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_i386_relative);
+           ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_arm_relative);
            inc(j);
           end
-         else
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
           begin
            if(m=1) then
             begin
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress;
              finalfile.CoffList[k-1].Item[m-1].Offset:=0;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_highlow;
@@ -6929,7 +7158,7 @@ begin
            else
             begin
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_highlow;
              inc(m);
@@ -6939,9 +7168,33 @@ begin
               end;
             end;
           end;
-         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+
+         (GotInternalIndex+GotPltOffset+GotProtect-1)*4)^:=
+         GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+        end
+       else if(FileResult.ConvertToRelocationBits>0) and (FileList.NeedCount>0)
+       and(basefile.SectionAttribute[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]<>0) then
+        begin
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0) then
+          begin
+           Pelf32_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf32_rela))^.Offset:=OriginalAddress;
+           Pelf32_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf32_rela))^.Addend:=
+           GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+           Pelf32_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_arm_relative);
+           inc(j);
+          end
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
+          begin
+           FileList.NeedBits[j-1]:=FileResult.ConvertToRelocationBits;
+           FileList.NeedAddress[j-1]:=OriginalAddress;
+           inc(j);
+          end;
         end;
       end;
      ChangePointer:=finalfile.SectionContent[SectionIndex[basefile.AdjustTable.
@@ -7186,21 +7439,18 @@ begin
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got_plt,
        [0,basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*8,
+       OriginalAddress,GoalAddress,GotAddress,(GotInternalIndex+2)*8,
        basefile.AdjustTable.AdjustSize[i-1]],false);
        n:=unifile_search_for_hash_table(finalfile.DynamicSymbolTableAssist,
        basefile.AdjustTable.AdjustHash[i-1]);
-       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
+       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false)
+       and(finalfile.RelocationDynamicTableIndex<>0) then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
          Pelf64_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-         finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*8;
+         GotAddress+(GotInternalIndex+2)*8;
          Pelf64_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf64_rela))^.Addend:=
@@ -7218,41 +7468,34 @@ begin
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1],(GotInternalIndex+GotPltOffset-1)*8,
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],0,OriginalAddress,GoalAddress,
+       GotAddress,(GotInternalIndex+GotPltOffset+GotProtect-1)*8,
        basefile.AdjustTable.AdjustSize[i-1]]);
        if(FileResult.GotType<>0) and
        (GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
-         if(fileclass<>unifile_class_pe_file) then
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0) then
           begin
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4;
+           GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4;
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+           GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_x86_64_relative);
            inc(j);
           end
-         else
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
           begin
            if(m=1) then
             begin
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress;
              finalfile.CoffList[k-1].Item[m-1].Offset:=0;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_dir64;
@@ -7261,7 +7504,7 @@ begin
            else
             begin
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_dir64;
              inc(m);
@@ -7271,9 +7514,33 @@ begin
               end;
             end;
           end;
-         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset+GotProtect-1)*8)^:=
+         GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+        end
+       else if(FileResult.ConvertToRelocationBits>0) and (FileList.NeedCount>0)
+       and(basefile.SectionAttribute[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]<>0) then
+        begin
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0)
+         and(FileResult.ConvertToRelocationBits=finalfile.Bits) then
+          begin
+           Pelf64_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf64_rela))^.Offset:=OriginalAddress;
+           Pelf64_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf64_rela))^.Addend:=
+           GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+           Pelf64_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_x86_64_relative);
+           inc(j);
+          end
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
+          begin
+           FileList.NeedBits[j-1]:=FileResult.ConvertToRelocationBits;
+           FileList.NeedAddress[j-1]:=OriginalAddress;
+           inc(j);
+          end;
         end;
       end;
      ChangePointer:=
@@ -7286,14 +7553,15 @@ begin
      or (basefile.AdjustTable.GoalSectionIndex[i-1]=0)) or
      ((RelocationSwitch) and (basefile.AdjustTable.GoalSectionIndex[i-1]=0)))) then
       begin
-        if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_x86_64_got_pc_rel) then
-         begin
-          case Pbyte(ChangePointer-1)^ of
-          $15:Pword(ChangePointer-2)^:=$E840;
-          $25:Pword(ChangePointer-2)^:=$E940;
+       if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_x86_64_got_pc_relative_without_rex) then
+        begin
+         case Pbyte(ChangePointer-1)^ of
+         $15:Pword(ChangePointer-2)^:=$E840;
+         $25:Pword(ChangePointer-2)^:=$E940;
          end;
         end
-       else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_x86_64_rex_got_pc_rel) then
+       else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_x86_64_got_pc_relative_with_rex)
+       or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_x86_64_pc_relative_offset_got)then
        Pbyte(ChangePointer-2)^:=$8D;
       end;
      if(FileResult.Bits=64) then
@@ -7345,20 +7613,17 @@ begin
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got_plt,
        [0,basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       (GotInternalIndex+2)*8,
-       finalfile.SectionAddress[finalfile.GotIndex-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1],0]);
+       OriginalAddress,(GotInternalIndex+2)*8,GotAddress,GotAddress,0]);
        n:=unifile_search_for_hash_table(finalfile.DynamicSymbolTableAssist,
        basefile.AdjustTable.AdjustHash[i-1]);
-       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
+       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false)
+       and (finalfile.RelocationDynamicTableIndex<>0)then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
          Pelf64_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-         finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*8;
+         GotAddress+(GotInternalIndex+2)*8;
          Pelf64_rela(finalfile.SectionContent[
          finalfile.RelocationDynamicTableIndex-1
          ]+(j-1)*sizeof(elf64_rela))^.Addend:=
@@ -7376,40 +7641,34 @@ begin
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       (GotInternalIndex+GotPltOffset-1)*8,
-       finalfile.SectionAddress[finalfile.GotIndex-1],
-       finalfile.SectionAddress[finalfile.GotIndex-1],0]);
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],0,
+       OriginalAddress,(GotInternalIndex+GotPltOffset+GotProtect-1)*8,
+       GotAddress,GotAddress,0]);
        if(FileResult.GotType<>0) and
        (GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
-         if(fileclass<>unifile_class_pe_file) then
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0) then
           begin
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8;
+           GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8;
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-           finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-           +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+           GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_aarch64_relative);
            inc(j);
           end
-         else
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
           begin
            if(m=1) then
             begin
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress;
              finalfile.CoffList[k-1].Item[m-1].Offset:=0;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_dir64;
@@ -7418,7 +7677,7 @@ begin
            else
             begin
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress;
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_dir64;
              inc(m);
@@ -7428,9 +7687,33 @@ begin
               end;
             end;
           end;
-         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset+GotProtect-1)*8)^:=
+         GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+        end
+       else if(FileResult.ConvertToRelocationBits>0) and (FileList.NeedCount>0)
+       and(basefile.SectionAttribute[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]<>0) then
+        begin
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0)
+         and(FileResult.ConvertToRelocationBits=finalfile.Bits) then
+          begin
+           Pelf64_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf64_rela))^.Offset:=OriginalAddress;
+           Pelf64_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf64_rela))^.Addend:=GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+           Pelf64_rela(finalfile.SectionContent[
+           finalfile.RelocationDynamicTableIndex-1
+           ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_aarch64_relative);
+           inc(AllSectionOffset[finalfile.RelocationDynamicTableIndex-1]);
+           inc(j);
+          end
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
+          begin
+           FileList.NeedBits[j-1]:=FileResult.ConvertToRelocationBits;
+           FileList.NeedAddress[j-1]:=OriginalAddress;
+           inc(j);
+          end;
         end;
       end;
      ChangePointer:=
@@ -7728,20 +8011,19 @@ begin
        [0,basefile.AdjustTable.AdjustAddend[i-1],0,
        finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
        +basefile.AdjustTable.OriginalOffset[i-1],
-       q1,(GotInternalIndex+2)*4,finalfile.SectionAddress[finalfile.GotIndex-1],0],false,
+       q1,(GotInternalIndex+2)*4,GotAddress,0],false,
        basefile.AdjustTable.AdjustRiscVType[i-1])
        else
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got_plt,
        [0,basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       q1,(GotInternalIndex+2)*8,finalfile.SectionAddress[finalfile.GotIndex-1],0],false,
+       OriginalAddress,q1,(GotInternalIndex+2)*8,GotAddress,0],false,
        basefile.AdjustTable.AdjustRiscVType[i-1]);
        n:=unifile_search_for_hash_table(finalfile.DynamicSymbolTableAssist,
        basefile.AdjustTable.AdjustHash[i-1]);
-       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
+       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false)
+       and(finalfile.RelocationDynamicTableIndex<>0)then
         begin
          if(finalfile.Bits=32) then
           begin
@@ -7749,7 +8031,7 @@ begin
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*4;
+           GotAddress+(GotInternalIndex+2)*4;
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Addend:=
@@ -7764,7 +8046,7 @@ begin
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*8;
+           GotAddress+(GotInternalIndex+2)*8;
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Addend:=
@@ -7784,42 +8066,32 @@ begin
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       q1,(GotInternalIndex+GotPltOffset-1)*4,finalfile.SectionAddress[finalfile.GotIndex-1],0],
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],0,
+       OriginalAddress,q1,(GotInternalIndex+GotPltOffset+GotProtect-1)*4,GotAddress,0],
        false,basefile.AdjustTable.AdjustRiscVType[i-1])
        else
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],0,
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],
-       q1,(GotInternalIndex+GotPltOffset-1)*8,finalfile.SectionAddress[finalfile.GotIndex-1],0],
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],0,
+       OriginalAddress,q1,(GotInternalIndex+GotPltOffset+GotProtect-1)*8,GotAddress,0],
        false,basefile.AdjustTable.AdjustRiscVType[i-1]);
        if(FileResult.GotType<>0) and
        (GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
-         if(fileclass<>unifile_class_pe_file) then
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0) then
           begin
-           j:=AllSectionOffset[finalfile.RelocationDynamicTableIndex-1];
            if(finalfile.Bits=32) then
             begin
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4;
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4;
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+             GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_riscv_relative);
@@ -7829,29 +8101,28 @@ begin
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8;
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8;
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+             GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_riscv_relative);
             end;
-           inc(AllSectionOffset[finalfile.RelocationDynamicTableIndex-1]);
+           inc(j);
           end
-         else
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
           begin
            if(m=1) then
             begin
              if(finalfile.Bits=32) then
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress
              else
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress;
              finalfile.CoffList[k-1].Item[m-1].Offset:=0;
              if(finalfile.Bits=32) then
@@ -7864,11 +8135,11 @@ begin
             begin
              if(finalfile.Bits=32) then
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress
              else
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress;
              if(finalfile.Bits=32) then
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_highlow
@@ -7886,13 +8157,55 @@ begin
             end;
           end;
          if(finalfile.Bits=32) then
-         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1]
+         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+
+         (GotInternalIndex+GotPltOffset+GotProtect-1)*4)^:=
+         GoalAddress+basefile.AdjustTable.AdjustAddend[i-1]
          else
-         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+
+         (GotInternalIndex+GotPltOffset+GotProtect-1)*8)^:=
+         GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+        end
+       else if(FileResult.ConvertToRelocationBits>0) and (FileList.NeedCount>0)
+       and(basefile.SectionAttribute[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]<>0) then
+        begin
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0)
+         and(FileResult.ConvertToRelocationBits=finalfile.Bits) then
+          begin
+           if(basefile.Bits=32) then
+            begin
+             Pelf32_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf32_rela))^.Offset:=OriginalAddress;
+             Pelf32_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf32_rela))^.Addend:=
+             GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+             Pelf32_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_riscv_relative);
+             inc(AllSectionOffset[finalfile.RelocationDynamicTableIndex-1]);
+            end
+           else
+            begin
+             Pelf64_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf64_rela))^.Offset:=OriginalAddress;
+             Pelf64_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf64_rela))^.Addend:=GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+             Pelf64_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_riscv_relative);
+             inc(AllSectionOffset[finalfile.RelocationDynamicTableIndex-1]);
+            end;
+           inc(j);
+          end
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
+          begin
+           FileList.NeedBits[j-1]:=FileResult.ConvertToRelocationBits;
+           FileList.NeedAddress[j-1]:=OriginalAddress;
+           inc(j);
+          end;
         end;
       end;
      ChangeValue:=unifile_calculate_comple(FileResult.AdjustValue,FileResult.Bits,
@@ -8048,20 +8361,17 @@ begin
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got_plt,
        [0,basefile.AdjustTable.AdjustAddend[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],0,
-       finalfile.SectionAddress[finalfile.GotIndex-1],(GotInternalIndex+2)*4])
+       OriginalAddress,0,GotAddress,(GotInternalIndex+2)*4])
        else
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got_plt,
        [0,basefile.AdjustTable.AdjustAddend[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],0,
-       finalfile.SectionAddress[finalfile.GotIndex-1],(GotInternalIndex+2)*8]);
+       OriginalAddress,0,GotAddress,(GotInternalIndex+2)*8]);
        n:=unifile_search_for_hash_table(finalfile.DynamicSymbolTableAssist,
        basefile.AdjustTable.AdjustHash[i-1]);
-       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
+       if(GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false)
+       and(finalfile.RelocationDynamicTableIndex<>0)then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
          if(finalfile.Bits=32) then
@@ -8069,7 +8379,7 @@ begin
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*4;
+           GotAddress+(GotInternalIndex+2)*4;
            Pelf32_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf32_rela))^.Addend:=
@@ -8084,7 +8394,7 @@ begin
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-           finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+2)*8;
+           GotAddress+(GotInternalIndex+2)*8;
            Pelf64_rela(finalfile.SectionContent[
            finalfile.RelocationDynamicTableIndex-1
            ]+(j-1)*sizeof(elf64_rela))^.Addend:=
@@ -8104,39 +8414,31 @@ begin
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],0,
-       finalfile.SectionAddress[finalfile.GotIndex-1],(GotInternalIndex+GotPltOffset-1)*4])
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],
+       OriginalAddress,0,GotAddress,(GotInternalIndex+GotPltOffset+GotProtect-1)*4])
        else
        FileResult:=unifile_calculate_relocation(basefile.Architecture,
        basefile.Bits,basefile.AdjustTable.AdjustType[i-1],
        unifile_got_class_got,
-       [finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.GoalOffset[i-1],
-       basefile.AdjustTable.AdjustAddend[i-1],
-       finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]-1]
-       +basefile.AdjustTable.OriginalOffset[i-1],0,
-       finalfile.SectionAddress[finalfile.GotIndex-1],(GotInternalIndex+GotPltOffset-1)*8]);
+       [GoalAddress,basefile.AdjustTable.AdjustAddend[i-1],
+       OriginalAddress,0,GotAddress,(GotInternalIndex+GotPltOffset+GotProtect-1)*8]);
        if(FileResult.GotType<>0) and
        (GotInternalIndex>0) and (finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]=false) then
         begin
          finalfile.GotTableList.GotHashEnable[GotInternalIndex-1]:=true;
-         if(fileclass<>unifile_class_pe_file) then
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0)
+         and (FileResult.ConvertToRelocationBits=finalfile.Bits) then
           begin
            if(finalfile.Bits=32) then
             begin
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4;
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4;
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Addend:=
-             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+             GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf32_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_loongarch_relative);
@@ -8146,29 +8448,28 @@ begin
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8;
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8;
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Addend:=
-             finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-             +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+             GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
              Pelf64_rela(finalfile.SectionContent[
              finalfile.RelocationDynamicTableIndex-1
              ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_loongarch_relative);
             end;
            inc(j);
           end
-         else
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
           begin
            if(m=1) then
             begin
              if(finalfile.Bits=32) then
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress
              else
              finalfile.CoffList[k-1].VirtualAddress:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress;
              finalfile.CoffList[k-1].Item[m-1].Offset:=0;
              if(finalfile.Bits=32) then
@@ -8181,11 +8482,11 @@ begin
             begin
              if(finalfile.Bits=32) then
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*4
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress
              else
              finalfile.CoffList[k-1].Item[m-1].Offset:=
-             finalfile.SectionAddress[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8
+             GotAddress+(GotInternalIndex+GotPltOffset+GotProtect-1)*8
              -basescript.BaseAddress-finalfile.CoffList[k-1].VirtualAddress;
              if(finalfile.Bits=32) then
              finalfile.CoffList[k-1].Item[m-1].ItemType:=coff_image_base_relocation_highlow
@@ -8203,13 +8504,54 @@ begin
             end;
           end;
          if(finalfile.Bits=32) then
-         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*4)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1]
+         Pdword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset+GotProtect-1)*4)^:=
+         GoalAddress+basefile.AdjustTable.AdjustAddend[i-1]
          else
-         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset-1)*8)^:=
-         finalfile.SectionAddress[SectionIndex[basefile.AdjustTable.GoalSectionIndex[i-1]-1]-1]
-         +basefile.AdjustTable.GoalOffset[i-1]+basefile.AdjustTable.AdjustAddend[i-1];
+         Pqword(finalfile.SectionContent[finalfile.GotIndex-1]+(GotInternalIndex+GotPltOffset+GotProtect-1)*8)^:=
+         GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+        end
+       else if(FileResult.ConvertToRelocationBits>0) and (FileList.NeedCount>0)
+       and(basefile.SectionAttribute[basefile.AdjustTable.OriginalSectionIndex[i-1]-1]<>0) then
+        begin
+         if(fileclass=unifile_class_elf_file) and (finalfile.RelocationDynamicTableIndex<>0)
+         and(FileResult.ConvertToRelocationBits=finalfile.Bits) then
+          begin
+           if(basefile.Bits=32) then
+            begin
+             Pelf32_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf32_rela))^.Offset:=OriginalAddress;
+             Pelf32_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf32_rela))^.Addend:=
+             GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+             Pelf32_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf32_rela))^.Info:=elf32_reloc_info(0,elf_reloc_loongarch_relative);
+             inc(AllSectionOffset[finalfile.RelocationDynamicTableIndex-1]);
+            end
+           else
+            begin
+             Pelf64_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf64_rela))^.Offset:=OriginalAddress;
+             Pelf64_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf64_rela))^.Addend:=
+             GoalAddress+basefile.AdjustTable.AdjustAddend[i-1];
+             Pelf64_rela(finalfile.SectionContent[
+             finalfile.RelocationDynamicTableIndex-1
+             ]+(j-1)*sizeof(elf64_rela))^.Info:=elf64_reloc_info(0,elf_reloc_loongarch_relative);
+             inc(AllSectionOffset[finalfile.RelocationDynamicTableIndex-1]);
+            end;
+           inc(j);
+          end
+         else if(fileclass=unifile_class_pe_file) and (finalfile.RelocationIndex>0) then
+          begin
+           FileList.NeedBits[j-1]:=FileResult.ConvertToRelocationBits;
+           FileList.NeedAddress[j-1]:=OriginalAddress;
+           inc(j);
+          end;
         end;
       end;
      ChangeValue:=unifile_calculate_comple(FileResult.AdjustValue,FileResult.Bits,
@@ -8364,6 +8706,84 @@ begin
       end;
     end;
   end;
+ {If the Convertion to Relocation Exists,PE .reloc should be reconstructed.}
+ if(fileclass=unifile_class_pe_file) and (FileList.NeedCount>0) then
+  begin
+   i:=1; PEBaseAddress:=0;
+   while(i<=FileList.NeedCount)do
+    begin
+     if(PEBaseAddress=0) then
+      begin
+       inc(finalfile.CoffListCount);
+       SetLength(finalfile.CoffList,finalfile.CoffListCount);
+       finalfile.CoffList[finalfile.CoffListCount-1].VirtualAddress:=
+       FileList.NeedAddress[i-1]-basescript.BaseAddress;
+       finalfile.CoffList[finalfile.CoffListCount-1].SizeOfBlock:=8;
+       finalfile.CoffList[finalfile.CoffListCount-1].ItemCount:=0;
+       PEBaseAddress:=FileList.NeedAddress[i-1];
+      end
+     else if(FileList.NeedAddress[i-1]<PEBaseAddress+$FFF) then
+      begin
+       inc(finalfile.CoffList[finalfile.CoffListCount-1].ItemCount);
+       SetLength(finalfile.CoffList[finalfile.CoffListCount-1].Item,
+       finalfile.CoffList[finalfile.CoffListCount-1].ItemCount);
+       inc(finalfile.CoffList[finalfile.CoffListCount-1].SizeOfBlock,2);
+       if(FileList.NeedBits[i-1]=16) then
+       finalfile.CoffList[finalfile.CoffListCount-1].Item
+       [finalfile.CoffList[finalfile.CoffListCount-1].ItemCount-1].
+       ItemType:=coff_image_base_relocation_low
+       else if(FileList.NeedBits[i-1]=32) then
+       finalfile.CoffList[finalfile.CoffListCount-1].Item
+       [finalfile.CoffList[finalfile.CoffListCount-1].ItemCount-1].
+       ItemType:=coff_image_base_relocation_highlow
+       else if(FileList.NeedBits[i-1]=64) then
+       finalfile.CoffList[finalfile.CoffListCount-1].Item
+       [finalfile.CoffList[finalfile.CoffListCount-1].ItemCount-1].
+       ItemType:=coff_image_base_relocation_dir64;
+       finalfile.CoffList[finalfile.CoffListCount-1].Item
+       [finalfile.CoffList[finalfile.CoffListCount-1].ItemCount-1].Offset:=
+       FileList.NeedAddress[i-1]-PEBaseAddress;
+      end
+     else
+      begin
+       inc(finalfile.CoffListCount);
+       SetLength(finalfile.CoffList,finalfile.CoffListCount);
+       finalfile.CoffList[finalfile.CoffListCount-1].VirtualAddress:=
+       FileList.NeedAddress[i-1]-basescript.BaseAddress;
+       finalfile.CoffList[finalfile.CoffListCount-1].SizeOfBlock:=8;
+       finalfile.CoffList[finalfile.CoffListCount-1].ItemCount:=0;
+       PEBaseAddress:=FileList.NeedAddress[i-1];
+      end;
+     inc(i);
+    end;
+   {Calculate the PE .reloc Address and then Regenerate the .reloc Empty Size}
+   PERelocationSize:=0;
+   for i:=1 to finalfile.CoffListCount do
+    begin
+     inc(PERelocationSize,finalfile.CoffList[i-1].SizeOfBlock);
+     if(i=finalfile.CoffListCount) then
+      begin
+       if(finalfile.Bits=32) then
+        begin
+         finalfile.CoffList[i-1].SizeOfBlock:=
+         unifile_align(PERelocationSize,4)-PERelocationSize+finalfile.CoffList[i-1].SizeOfBlock;
+         PERelocationSize:=unifile_align(PERelocationSize,4);
+        end
+       else if(finalfile.Bits=64) then
+        begin
+         finalfile.CoffList[i-1].SizeOfBlock:=
+         unifile_align(PERelocationSize,8)-PERelocationSize+finalfile.CoffList[i-1].SizeOfBlock;
+         PERelocationSize:=unifile_align(PERelocationSize,8);
+        end;
+      end;
+    end;
+   ReallocMem(finalfile.SectionContent[finalfile.RelocationIndex-1],PERelocationSize);
+   finalfile.SectionSize[finalfile.RelocationIndex-1]:=PERelocationSize;
+   finalfile.FinalFileSize:=unifile_align(finalfile.SectionOffset[finalfile.RelocationIndex-1]
+   +PERelocationSize,finalfile.FileAlign);
+   finalfile.FinalSectionOffset:=unifile_align(finalfile.FinalSectionOffset
+   +finalfile.CoffStringTableSize+finalfile.CoffSymbolTableSize,finalfile.FileAlign);
+  end;
  {For PE .reloc section}
  if(fileclass=unifile_class_pe_file) then
   begin
@@ -8398,7 +8818,8 @@ begin
     end;
   end;
  {For .dynamic address of the .got}
- if(fileclass=unifile_class_elf_file) and (GotPltOffset>0) then
+ if(fileclass=unifile_class_elf_file) and (finalfile.GotTableList.GotCount>0) and
+ (GotPltOffset>0) and (finalfile.DynamicIndex>0) then
   begin
    if(finalfile.Bits=32) then
    Pdword(finalfile.SectionContent[finalfile.GotIndex-1])^:=
@@ -8417,7 +8838,8 @@ begin
     end;
   end;
  {For Generate the Content of the Dynamic Contents}
- if(fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable) then
+ if(fileclass=unifile_class_elf_file) and (basescript.elfclass<>unild_class_relocatable)
+ and(finalfile.DynamicIndex>0) then
   begin
    WritePointer1:=1; WritePointer2:=1;
    for i:=1 to finalfile.DynamicList.DynamicCount do
@@ -8431,8 +8853,7 @@ begin
          dynamic_entry_type:=
          finalfile.DynamicList.DynamicType[i-1];
          Pelf32_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf32_dynamic_entry))^.
-         dynamic_pointer:=
-         finalfile.SectionAddress[finalfile.GotIndex-1];
+         dynamic_pointer:=GotAddress;
         end
        else
         begin
@@ -8440,8 +8861,7 @@ begin
          dynamic_entry_type:=
          finalfile.DynamicList.DynamicType[i-1];
          Pelf64_dynamic_entry(finalfile.SectionContent[finalfile.DynamicIndex-1]+(i-1)*sizeof(elf64_dynamic_entry))^.
-         dynamic_pointer:=
-         finalfile.SectionAddress[finalfile.GotIndex-1];
+         dynamic_pointer:=GotAddress;
         end;
       end
      else if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_hash) then
@@ -8790,14 +9210,15 @@ begin
    allocmem((HashTable.BucketCount+HashTable.ChainCount+2)*4);
    finalfile.SectionSize[finalfile.HashTableIndex-1]:=(HashTable.BucketCount+HashTable.ChainCount+2)*4;
    Pdword(finalfile.SectionContent[finalfile.HashTableIndex-1])^:=HashTable.BucketCount;
-   Pdword(finalfile.SectionContent[finalfile.HashTableIndex-1]+4)^:=HashTable.ChainCount;
-   WritePointer1:=2;
+   WritePointer1:=1;
    for i:=1 to HashTable.BucketCount do
     begin
      Pdword(finalfile.SectionContent[finalfile.HashTableIndex-1]+WritePointer1*4)^:=
      HashTable.BucketItem[i-1];
      inc(WritePointer1);
     end;
+   Pdword(finalfile.SectionContent[finalfile.HashTableIndex-1]+WritePointer1*4)^:=HashTable.ChainCount;
+   inc(WritePointer1);
    for i:=1 to HashTable.ChainCount do
     begin
      Pdword(finalfile.SectionContent[finalfile.HashTableIndex-1]+WritePointer1*4)^:=
@@ -8817,6 +9238,8 @@ begin
        j:=1;
        if(finalfile.Bits=32) then
         begin
+         if(finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]
+         <>elf_symbol_type_section) then
          Pelf32_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf32_symbol_table_entry))^.symbol_name:=WritePointer2;
          Pelf32_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
@@ -8832,7 +9255,11 @@ begin
          Pelf32_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf32_symbol_table_entry))^.symbol_other:=
          finalfile.SymbolTable.SymbolVisibility[finalfile.SymbolTableNewIndex[i-1]-1];
-         if(basescript.elfclass<>unild_class_relocatable) and
+         if(finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]
+         =elf_symbol_type_section) then
+         Pelf32_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
+         WritePointer1*sizeof(elf32_symbol_table_entry))^.symbol_value:=0
+         else if(basescript.elfclass<>unild_class_relocatable) and
          (finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]<>elf_symbol_type_file)
          then
          Pelf32_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
@@ -8846,6 +9273,8 @@ begin
         end
        else if(finalfile.Bits=64) then
         begin
+         if(finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]
+         <>elf_symbol_type_section) then
          Pelf64_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf64_symbol_table_entry))^.symbol_name:=WritePointer2;
          Pelf64_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
@@ -8861,7 +9290,11 @@ begin
          Pelf64_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
          WritePointer1*sizeof(elf64_symbol_table_entry))^.symbol_other:=
          finalfile.SymbolTable.SymbolVisibility[finalfile.SymbolTableNewIndex[i-1]-1];
-         if(basescript.elfclass<>unild_class_relocatable) and
+         if(finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]
+         =elf_symbol_type_section) then
+         Pelf64_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
+         WritePointer1*sizeof(elf64_symbol_table_entry))^.symbol_value:=0
+         else if(basescript.elfclass<>unild_class_relocatable) and
          (finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]<>elf_symbol_type_file)
          then
          Pelf64_symbol_table_entry(finalfile.SectionContent[finalfile.SymbolTableIndex-1]+
@@ -8873,13 +9306,17 @@ begin
          WritePointer1*sizeof(elf64_symbol_table_entry))^.symbol_value:=
          finalfile.SymbolTable.SymbolValue[finalfile.SymbolTableNewIndex[i-1]-1];
         end;
-       while(j<=length(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]))do
+       if(finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]
+       <>elf_symbol_type_section) then
         begin
-         PChar(finalfile.SectionContent[finalfile.SymbolStringTableIndex-1]+WritePointer2)^:=
-         finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1][j];
-         inc(j); inc(WritePointer2);
+         while(j<=length(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]))do
+          begin
+           PChar(finalfile.SectionContent[finalfile.SymbolStringTableIndex-1]+WritePointer2)^:=
+           finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1][j];
+           inc(j); inc(WritePointer2);
+          end;
+         inc(WritePointer2);
         end;
-       inc(WritePointer2);
        inc(WritePointer1);
        inc(i);
       end;
