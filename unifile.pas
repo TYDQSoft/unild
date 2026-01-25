@@ -8779,9 +8779,9 @@ begin
     end;
    ReallocMem(finalfile.SectionContent[finalfile.RelocationIndex-1],PERelocationSize);
    finalfile.SectionSize[finalfile.RelocationIndex-1]:=PERelocationSize;
-   finalfile.FinalFileSize:=unifile_align(finalfile.SectionOffset[finalfile.RelocationIndex-1]
+   finalfile.FinalSectionOffset:=unifile_align(finalfile.SectionOffset[finalfile.RelocationIndex-1]
    +PERelocationSize,finalfile.FileAlign);
-   finalfile.FinalSectionOffset:=unifile_align(finalfile.FinalSectionOffset
+   finalfile.FinalFileSize:=unifile_align(finalfile.FinalSectionOffset
    +finalfile.CoffStringTableSize+finalfile.CoffSymbolTableSize,finalfile.FileAlign);
   end;
  {For PE .reloc section}
