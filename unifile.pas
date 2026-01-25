@@ -18,6 +18,7 @@ type unifile_elf_object_file_symbol_table=packed record
                                           end;
      unifile_elf_object_file=packed record
                              FilePointer:Pointer;
+                             Relocatable:boolean;
                              Architecture:word;
                              Bits:Byte;
                              FileFlag:Dword;
@@ -254,7 +255,6 @@ type unifile_elf_object_file_symbol_table=packed record
      unifile_result=packed record
                     GotType:byte;
                     AdjustValue:SizeInt;
-                    SpecialBool:boolean;
                     RiscvType:byte;
                     Bits:byte;
                     ConvertToRelocationBits:byte;
@@ -367,7 +367,6 @@ type unifile_elf_object_file_symbol_table=packed record
 
 var unifile_fileList:unifile_file_list_settings;
 
-
       {For Bits Constant}
 const unifile_bit_32=32;
       unifile_bit_64=64;
@@ -413,6 +412,7 @@ archivefile:unifile_elf_archive_file);
 procedure unifile_total_free(var totalfile:unifile_elf_object_file_total);
 function unifile_total_check_bits(totalfile:unifile_elf_object_file_total;Bits:byte):boolean;
 function unifile_total_check(totalfile:unifile_elf_object_file_total;Architecture:byte;Bits:byte):boolean;
+function unifile_total_check_relocatable(totalfile:unifile_elf_object_file_total):boolean;
 function unifile_parse(var totalfile:unifile_elf_object_file_total):unifile_elf_object_file_parsed;
 function unifile_parsed_to_first_stage(var basefile:unifile_elf_object_file_parsed;
 var basescript:unild_script;SmartLinking:boolean):unifile_linked_file_stage;
@@ -427,7 +427,7 @@ begin
 end;
 function unifile_hash_table_bucket_count(SearchCount:SizeUint):SizeUInt;
 begin
- Result:=SearchCount*9 div 5;
+ Result:=SearchCount*5 div 3+1;
 end;
 function unifile_lsb_to_msb(lsbdata:word):word;
 begin
@@ -667,6 +667,19 @@ begin
       begin
        DynamicSharedObjectNameIndex:=
        Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value;
+      end
+     else if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_flags_1) then
+      begin
+       if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value and
+       elf_dynamic_flag_1_pie<>0) then
+        begin
+         FreeMem(SharedContent);
+         writeln('ERROR:This dynamic library '+DynamicLibraryPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable).');
+         readln;
+         halt;
+        end;
       end;
      inc(i);
     end;
@@ -789,6 +802,19 @@ begin
       begin
        DynamicSharedObjectNameIndex:=
        Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value;
+      end
+     else if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_flags_1) then
+      begin
+       if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value and
+       elf_dynamic_flag_1_pie<>0) then
+        begin
+         FreeMem(SharedContent);
+         writeln('ERROR:This dynamic library '+DynamicLibraryPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable).');
+         readln;
+         halt;
+        end;
       end;
      inc(i);
     end;
@@ -1031,6 +1057,19 @@ begin
       begin
        DynamicStringPointer:=InterpreterContent+
        Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_flags_1) then
+      begin
+       if(Pelf32_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf32_dynamic_entry))^.dynamic_value and
+       elf_dynamic_flag_1_pie<>0) then
+        begin
+         FreeMem(InterpreterContent);
+         writeln('ERROR:This dynamic library '+InterpreterPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable),Interpreter should be a dynamic library.');
+         readln;
+         halt;
+        end;
       end;
      inc(i);
     end;
@@ -1060,7 +1099,7 @@ begin
    Result.InterpreterHashTable.BucketCount:=tempnum1;
    SetLength(Result.InterpreterHashTable.BucketItem,tempnum1);
    SetLength(Result.InterpreterHashTable.BucketHash,tempnum1);
-   tempnum2:=Pdword(HashPointer+4)^;
+   tempnum2:=Pdword(HashPointer+4+tempnum1*4)^;
    Result.InterpreterHashTable.ChainCount:=tempnum2;
    SetLength(Result.InterpreterHashTable.ChainItem,tempnum2);
    SetLength(Result.InterpreterHashTable.ChainHash,tempnum2);
@@ -1162,6 +1201,19 @@ begin
       begin
        DynamicStringPointer:=InterpreterContent+
        Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_pointer;
+      end
+     else if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_entry_type=
+     elf_dynamic_type_flags_1) then
+      begin
+       if(Pelf64_dynamic_entry(DynamicPointer+(i-1)*sizeof(elf64_dynamic_entry))^.dynamic_value and
+       elf_dynamic_flag_1_pie<>0) then
+        begin
+         FreeMem(InterpreterContent);
+         writeln('ERROR:This dynamic library '+InterpreterPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable),Interpreter should be a dynamic library.');
+         readln;
+         halt;
+        end;
       end;
      inc(i);
     end;
@@ -1191,7 +1243,7 @@ begin
    Result.InterpreterHashTable.BucketCount:=tempnum1;
    SetLength(Result.InterpreterHashTable.BucketItem,tempnum1);
    SetLength(Result.InterpreterHashTable.BucketHash,tempnum1);
-   tempnum2:=Pdword(HashPointer+4)^;
+   tempnum2:=Pdword(HashPointer+4+tempnum1*4)^;
    Result.InterpreterHashTable.ChainCount:=tempnum2;
    SetLength(Result.InterpreterHashTable.ChainItem,tempnum2);
    SetLength(Result.InterpreterHashTable.ChainHash,tempnum2);
@@ -1291,6 +1343,7 @@ begin
      readln;
      halt;
     end;
+   Result.Relocatable:=Pelf32_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end
  else if(Result.Bits=64) then
   begin
@@ -1302,6 +1355,7 @@ begin
      readln;
      halt;
     end;
+   Result.Relocatable:=Pelf64_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end;
  {After that,parse the elf file}
  SectionCount:=0; Result.RelocationCount:=0;
@@ -1532,6 +1586,7 @@ begin
      readln;
      halt;
     end;
+   Result.Relocatable:=Pelf32_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end
  else if(Result.Bits=64) then
   begin
@@ -1543,6 +1598,7 @@ begin
      readln;
      halt;
     end;
+   Result.Relocatable:=Pelf64_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end;
  SectionCount:=0; Result.RelocationCount:=0;
  {After that,parse the elf file}
@@ -1862,18 +1918,26 @@ begin
   begin
    if(totalfile.Objects[i-1].Bits<>Bits) then exit(false);
   end;
- unifile_total_check_bits:=true;
+ Result:=true;
 end;
 function unifile_total_check(totalfile:unifile_elf_object_file_total;Architecture:byte;Bits:byte):boolean;
 var i:SizeUint;
 begin
- i:=1;
  for i:=1 to totalfile.ObjectCount do
   begin
    if(totalfile.Objects[i-1].Architecture<>Architecture) or
    (totalfile.Objects[i-1].Bits<>Bits) then exit(false);
   end;
- unifile_total_check:=true;
+ Result:=true;
+end;
+function unifile_total_check_relocatable(totalfile:unifile_elf_object_file_total):boolean;
+var i:SizeUint;
+begin
+ for i:=1 to totalfile.ObjectCount do
+  begin
+   if(totalfile.Objects[i-1].Relocatable=false) then exit(false);
+  end;
+ Result:=true;
 end;
 function unifile_parse(var totalfile:unifile_elf_object_file_total):unifile_elf_object_file_parsed;
 var i,j,k,m:SizeUInt;
@@ -3092,7 +3156,7 @@ begin
    elf_reloc_i386_32bit:Result.NeedRelocationBits:=32;
    elf_reloc_i386_16bit:Result.NeedRelocationBits:=16;
    elf_reloc_i386_got32,elf_reloc_i386_got_offset:Result.GotBool:=true;
-   elf_reloc_i386_got_relaxable:Result.GotBool:=GoalBool;
+   elf_reloc_i386_got_relaxable:Result.GotBool:=not GoalBool;
    end;
   end;
  elf_machine_arm:
@@ -3176,7 +3240,7 @@ function unifile_calculate_relocation(RelocationArchitecture:word;RelocationBits
 RelocationType:SizeUint;GotType:byte;RelocationData:array of SizeInt;GoalBool:boolean=true;
 RiscvSpecial:byte=0):unifile_result;
 begin
- Result.GotType:=0; Result.Bits:=0; Result.AdjustValue:=0; Result.SpecialBool:=false;
+ Result.GotType:=0; Result.Bits:=0; Result.AdjustValue:=0;
  Result.RiscvType:=0; Result.ConvertToRelocationBits:=0;
  case RelocationArchitecture of
  elf_machine_386:
@@ -3223,7 +3287,6 @@ begin
     end;
    elf_reloc_i386_got_relaxable:
     begin
-     Result.SpecialBool:=GoalBool;
      if(GoalBool=false) then
      Result.AdjustValue:=RelocationData[5]+RelocationData[6]+RelocationData[1]-RelocationData[3]
      else
@@ -3594,7 +3657,6 @@ begin
     end;
    elf_reloc_x86_64_pc_relative_offset_got:
     begin
-     Result.SpecialBool:=GoalBool;
      if(GoalBool=false) then
       begin
        Result.AdjustValue:=RelocationData[6]+RelocationData[5]+RelocationData[1]-RelocationData[3];
@@ -3681,7 +3743,7 @@ begin
     end;
    elf_reloc_x86_64_got_pc_relative_without_rex,elf_reloc_x86_64_got_pc_relative_with_rex:
     begin
-     Result.SpecialBool:=GoalBool; Result.Bits:=32;
+     Result.Bits:=32;
      if(GoalBool=false) then
      Result.AdjustValue:=RelocationData[5]+RelocationData[6]+RelocationData[1]-RelocationData[3]
      else
@@ -5269,6 +5331,10 @@ var finalfile:unifile_file_final;
     i,j,k,m,n,a,b,c,d,e:SizeUint;
     tempstr1:string;
     InclineSwitch:boolean;
+    {For String Name to the file}
+    StringLength:SizeUint;
+    StringSourcePointer:PChar;
+    StringDestinationPointer:PChar;
     {For ELF File}
     DynamicCount:SizeUint;
     DynamicBool,GotBool,InitialBool,InitialArrayBool,FinalBool,FinalArrayBool:boolean;
@@ -5356,6 +5422,12 @@ begin
   end;
  SetLength(FileList.NeedAddress,FileList.NeedCount);
  SetLength(FileList.NeedBits,FileList.NeedCount);
+ if(finalfile.GotTableList.GotCountOriginal=0) then
+  begin
+   finalfile.GotTableList.GotHashTable.BucketCount:=0;
+   finalfile.GotTableList.GotHashTable.ChainCount:=0;
+   goto SkipGot;
+  end;
  SetLength(finalfile.GotTableList.GotHashList,finalfile.GotTableList.GotCountOriginal);
  {Initialize the Original Got Table}
  finalfile.GotTableList.GotHashOriginal.BucketCount:=
@@ -6780,15 +6852,35 @@ begin
      finalfile.SymbolTableNewIndex[i-1]-1])>8) then
       begin
        Pcoff_symbol_table_item(finalfile.CoffSymbolTableContent+i-1)^.Name.Offset:=j;
-       k:=1;
-       while(k<=length(finalfile.SymbolTable.SymbolName[
-       finalfile.SymbolTableNewIndex[i-1]-1]))do
+       StringLength:=length(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
+       StringDestinationPointer:=finalfile.CoffStringTableContent+j;
+       StringSourcePointer:=
+       Pointer(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
+       k:=0;
+       while(k<StringLength)do
         begin
-         (finalfile.CoffStringTableContent+j+k-1)^:=
-         finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1][k];
-         inc(k);
+         if(StringLength>=k+8) then
+          begin
+           Pqword(StringDestinationPointer+k)^:=Pqword(StringSourcePointer+k)^;
+           inc(k,8);
+          end
+         else if(StringLength>=k+4) then
+          begin
+           Pdword(StringDestinationPointer+k)^:=Pdword(StringSourcePointer+k)^;
+           inc(k,4);
+          end
+         else if(StringLength>=k+2) then
+          begin
+           Pword(StringDestinationPointer+k)^:=Pword(StringSourcePointer+k)^;
+           inc(k,2);
+          end
+         else if(StringLength>=k+1) then
+          begin
+           Pbyte(StringDestinationPointer+k)^:=Pbyte(StringSourcePointer+k)^;
+           inc(k,1);
+          end;
         end;
-       inc(j,length(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1])+1);
+       inc(j,StringLength+1);
        Pcoff_symbol_table_item(finalfile.CoffSymbolTableContent+i-1)^.Name.Reserved:=0;
       end
      else
@@ -6883,7 +6975,7 @@ begin
  if(basescript.elfclass<>unild_class_relocatable) or (fileclass=unifile_class_pe_file) then
  RelocationSwitch:=true;
  FileResult.AdjustValue:=0; FileResult.RiscvType:=0; FileResult.Bits:=0;
- FileResult.GotType:=0; FileResult.SpecialBool:=false;
+ FileResult.GotType:=0;
  if(finalfile.GotTableList.GotCount>0) then
  GotAddress:=finalfile.SectionAddress[finalfile.GotIndex-1] else GotAddress:=0;
  for i:=1 to basefile.AdjustTable.Count do
@@ -9127,13 +9219,35 @@ begin
      if(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_needed)
      or(finalfile.DynamicList.DynamicType[i-1]=elf_dynamic_type_library_search_path) then
       begin
-       for j:=1 to length(finalfile.DynamicList.DynamicItem[i-1].DynamicString) do
+       StringLength:=length(finalfile.DynamicList.DynamicItem[i-1].DynamicString);
+       StringDestinationPointer:=
+       finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]+WritePointer1;
+       StringSourcePointer:=Pointer(finalfile.DynamicList.DynamicItem[i-1].DynamicString);
+       j:=0;
+       while(j<StringLength)do
         begin
-         PChar(finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]+WritePointer1)^:=
-         finalfile.DynamicList.DynamicItem[i-1].DynamicString[j];
-         inc(WritePointer1);
+         if(StringLength>=j+8) then
+          begin
+           Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
+           inc(j,8);
+          end
+         else if(StringLength>=j+4) then
+          begin
+           Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
+           inc(j,4);
+          end
+         else if(StringLength>=j+2) then
+          begin
+           Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
+           inc(j,2);
+          end
+         else if(StringLength>=j+1) then
+          begin
+           Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
+           inc(j,1);
+          end;
         end;
-       inc(WritePointer1);
+       inc(WritePointer1,StringLength+1);
       end;
     end;
    WritePointer2:=1;
@@ -9177,13 +9291,37 @@ begin
        finalfile.SectionAddress[finalfile.DynamicSymbolTable.SymbolSectionIndex[finalfile.DynamicSymbolTableNewIndex[i-1]-1]-1]+
        finalfile.DynamicSymbolTable.SymbolValue[finalfile.DynamicSymbolTableNewIndex[i-1]-1];
       end;
-     for j:=1 to length(finalfile.DynamicSymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]) do
+     StringLength:=
+     length(finalfile.DynamicSymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
+     StringDestinationPointer:=
+     finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]+WritePointer1;
+     StringSourcePointer:=
+     Pointer(finalfile.DynamicSymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
+     j:=0;
+     while(j<StringLength)do
       begin
-       PChar(finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]+WritePointer1)^:=
-       finalfile.DynamicSymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1][j];
-       inc(WritePointer1);
+       if(StringLength>=j+8) then
+        begin
+         Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
+         inc(j,8);
+        end
+       else if(StringLength>=j+4) then
+        begin
+         Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
+         inc(j,4);
+        end
+       else if(StringLength>=j+2) then
+        begin
+         Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
+         inc(j,2);
+        end
+       else if(StringLength>=j+1) then
+        begin
+         Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
+         inc(j,1);
+        end;
       end;
-     inc(WritePointer1); inc(WritePointer2);
+     inc(WritePointer1,StringLength+1); inc(WritePointer2);
     end;
    {Generate the Hash Table}
    i:=1;
@@ -9207,7 +9345,7 @@ begin
       end;
     end;
    finalfile.SectionContent[finalfile.HashTableIndex-1]:=
-   allocmem((HashTable.BucketCount+HashTable.ChainCount+2)*4);
+   getmem((HashTable.BucketCount+HashTable.ChainCount+2)*4);
    finalfile.SectionSize[finalfile.HashTableIndex-1]:=(HashTable.BucketCount+HashTable.ChainCount+2)*4;
    Pdword(finalfile.SectionContent[finalfile.HashTableIndex-1])^:=HashTable.BucketCount;
    WritePointer1:=1;
@@ -9309,13 +9447,37 @@ begin
        if(finalfile.SymbolTable.SymbolType[finalfile.SymbolTableNewIndex[i-1]-1]
        <>elf_symbol_type_section) then
         begin
-         while(j<=length(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]))do
+         StringLength:=
+         length(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
+         StringDestinationPointer:=
+         finalfile.SectionContent[finalfile.SymbolStringTableIndex-1]+WritePointer2;
+         StringSourcePointer:=
+         Pointer(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
+         j:=0;
+         while(j<StringLength)do
           begin
-           PChar(finalfile.SectionContent[finalfile.SymbolStringTableIndex-1]+WritePointer2)^:=
-           finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1][j];
-           inc(j); inc(WritePointer2);
+           if(StringLength>=j+8) then
+            begin
+             Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
+             inc(j,8);
+            end
+           else if(StringLength>=j+4) then
+            begin
+             Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
+             inc(j,4);
+            end
+           else if(StringLength>=j+2) then
+            begin
+             Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
+             inc(j,2);
+            end
+           else if(StringLength>=j+1) then
+            begin
+             Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
+             inc(j,1);
+            end;
           end;
-         inc(WritePointer2);
+         inc(WritePointer2,StringLength+1);
         end;
        inc(WritePointer1);
        inc(i);
@@ -9326,16 +9488,36 @@ begin
    WritePointer1:=1; i:=1;
    while(i<=finalfile.SectionCount)do
     begin
-     j:=1;
-     finalfile.SectionNameIndex[i-1]:=WritePointer1;
-     while(j<=length(finalfile.SectionName[i-1]))do
+     StringLength:=length(finalfile.SectionName[i-1]);
+     StringDestinationPointer:=
+     finalfile.SectionContent[finalfile.StringTableIndex-1]+WritePointer1;
+     StringSourcePointer:=Pointer(finalfile.SectionName[i-1]);
+     j:=0;
+     while(j<StringLength)do
       begin
-       PChar(finalfile.SectionContent[finalfile.StringTableIndex-1]+
-       WritePointer1)^:=finalfile.SectionName[i-1][j];
-       inc(j);
-       inc(WritePointer1);
+       if(StringLength>=j+8) then
+        begin
+         Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
+         inc(j,8);
+        end
+       else if(StringLength>=j+4) then
+        begin
+         Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
+         inc(j,4);
+        end
+       else if(StringLength>=j+2) then
+        begin
+         Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
+         inc(j,2);
+        end
+       else if(StringLength>=j+1) then
+        begin
+         Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
+         inc(j,1);
+        end;
       end;
-     inc(WritePointer1);
+     finalfile.SectionNameIndex[i-1]:=WritePointer1;
+     inc(WritePointer1,StringLength+1);
      inc(i);
     end;
   end;

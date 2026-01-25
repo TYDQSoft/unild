@@ -139,8 +139,12 @@ begin
  writeln('  Maintain the static symbol of the output file(disable the deleting symbol option).');
  writeln('--no-executable-stack,--no-executablestack,--no-exec-stack,--no-execstack');
  writeln('  Check the executable stack(ELF Files Only)');
- writeln('--no-writable-got,--no-writablegot,--no-writable,--nowritable,--no-write,--nowrite');
+ writeln('--readonlygot,--readonly-got');
  writeln('  Disable the Writable Got(Global Offset Table) section(ELF Files Only).');
+ writeln('--writablegot,--writable-got');
+ writeln('  Enable the Writable Got(Global Offset Table) section(ELF Files Only,Default).');
+ writeln('--uncheckedgot,--unchecked-got');
+ writeln('  Enable the Unchecked Got(Global Offset Table) section(ELF Files Only,Default).');
  writeln('--interpreter,--interp');
  writeln('  Specify the path of the interpreter(ELF PIE only,Default is no interpreter).');
  writeln('--output-file-name,--output-filename,--outputfilename,--output');
@@ -171,7 +175,8 @@ begin
  writeln('--baseaddress,--startaddress,--base-address,--start-address');
  writeln('  Specify the base address of the output file.');
  writeln('--filealign,--file-align');
- writeln('  Specify the file align of the output file(EFI File Only)');
+ writeln('  Specify the file align of the output file(EFI File in Section,while ELF File in program '+
+ 'header,default is 4KiB(4096 bytes))');
  writeln('--nodeflib,--nodefaultlib,--no-deflib,--no-defaultlib,--nodeflibrary,'+
  '--nodefaultlibrary,--no-deflibrary,--no-defaultlibrary');
  writeln('  Disable the Default Library of the file(Only vaild in ELF Format File).');
@@ -264,6 +269,10 @@ begin
  writeln('  Set the ELF Format Shared Library Internal Name for Dynamic Linking(ELF Only)');
  writeln('--enable-ver,--enablever,--enable-version,--enableversion');
  writeln('  Enable the Version of the ELF Format Files.');
+ writeln('--implicit-section-address,--implicitsection-address,--implicitsectionaddress');
+ writeln('  Enable the Implicit Section Changes with Section Name and its Address(Such as '+
+ '.hash,.gnu.hash,.dynsym,.dynstr,.dynamic,.got,.got.plt,any sort of .rela,.rel,.relr,'+
+ 'except .symtab,.strtab,.shstrtab cannot to be changed).');
  writeln('--help');
  writeln('  Show the help of the unild.');
 end;
@@ -275,6 +284,7 @@ var InputFileList:unifile_elf_object_file_total;
     {For Scanning}
     i,j,k:SizeUint;
     tempstr:string;
+    tempvalue:SizeUint;
     {For Linking}
     LinkerScript:string='';
     InputArchitecture:word=0;
@@ -352,12 +362,17 @@ begin
     begin
      Script.NoExecutableStack:=true;
     end
-   else if(LowerCase(ParamStr(i))='--no-writable-got') or
-   (LowerCase(ParamStr(i))='--no-writablegot') or
-   (LowerCase(ParamStr(i))='--no-writable') or (LowerCase(ParamStr(i))='--nowritable') or
-   (LowerCase(ParamStr(i))='--no-write') or (LowerCase(ParamStr(i))='--nowrite') then
+   else if(LowerCase(ParamStr(i))='--readonlygot') or (LowerCase(ParamStr(i))='--readonly-got') then
     begin
-     Script.NoGotWritable:=true;
+     Script.GotAuthority:=unild_readonly_got;
+    end
+   else if(LowerCase(ParamStr(i))='--writablegot') or (LowerCase(ParamStr(i))='--writable-got') then
+    begin
+     Script.GotAuthority:=unild_writable_got;
+    end
+   else if(LowerCase(ParamStr(i))='--uncheckedgot') or (LowerCase(ParamStr(i))='--unchecked-got') then
+    begin
+     Script.GotAuthority:=unild_unchecked_got;
     end
    else if(LowerCase(ParamStr(i))='--interpreter') or (LowerCase(ParamStr(i))='--interp') then
     begin
@@ -380,7 +395,7 @@ begin
        else break;
        inc(j);
       end;
-     i:=j;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--output-file-name')
    or(LowerCase(ParamStr(i))='--output-filename')
@@ -631,7 +646,7 @@ begin
      Script.NoFixedAddress:=false;
     end
    else if(LowerCase(ParamStr(i))='--debug') or (LowerCase(ParamStr(i))='--enable-debug')
-   or (LowerCase(ParamStr(i))='--enable-debug') then
+   or (LowerCase(ParamStr(i))='--enabledebug') then
     begin
      Script.DebugSwitch:=true;
     end
@@ -858,20 +873,62 @@ begin
     begin
      Script.EntryAsStartOfSection:=true;
     end
+   else if(LowerCase(ParamStr(i))='--implicit-section-address') or
+   (LowerCase(ParamStr(i))='--implicitsection-address') or
+   (LowerCase(ParamStr(i))='--implicitsectionaddress') then
+    begin
+     j:=i+1;
+     while(j<=ParamCount)do
+      begin
+       tempstr:=ParamStr(j);
+       if(Copy(tempstr,1,2)='--') then break;
+       if(tempstr='.strtab') or (tempstr='.symtab') or (tempstr='.shstrtab') then
+        begin
+         writeln('ERROR:Typed section '+tempstr+' is specified section auto-generated and '+
+         'not to be changed,cannot change address with the Implicit Section Address Command.');
+         readln;
+         halt;
+        end
+       else if(tempstr<>'.hash')and(tempstr<>'.gnu.hash')and(tempstr<>'.dynamic')
+       and(tempstr<>'.dynsym')and(tempstr<>'.dynstr')and(tempstr<>'.got')and(tempstr<>'.got.plt')
+       and(Copy(tempstr,1,5)<>'.rela')and(Copy(tempstr,1,5)<>'.relr')
+       and(Copy(tempstr,1,4)<>'.rel')then
+        begin
+         writeln('ERROR:Typed section '+tempstr+' is not the implicit section,cannot change address '+
+         'with the Implicit Section Address Command.');
+         readln;
+         halt;
+        end;
+       if(Copy(ParamStr(j+1),1,2)='--') then
+        begin
+         writeln('ERROR:The Specified Implicit Section does not have the address value of '+
+         'this implicit section.');
+         readln;
+         halt;
+        end;
+       tempvalue:=unild_str_to_int(ParamStr(j+1));
+       inc(Script.ImplicitCount);
+       SetLength(Script.ImplicitName,Script.ImplicitCount);
+       SetLength(Script.ImplicitAddress,Script.ImplicitCount);
+       Script.ImplicitName[i-1]:=tempstr;
+       Script.ImplicitAddress[i-1]:=tempvalue;
+       inc(j,2);
+      end;
+    end
    else if(LowerCase(ParamStr(i))='--help') then
     begin
      unild_help;
      readln;
-     halt;
+     exit;
     end
    else
     begin
-     writeln('ERROR:Unknown Command '+ParamStr(i+1));
+     writeln('ERROR:Unknown Command '+ParamStr(i));
      writeln('Now show the help manual:');
      unild_help;
      writeln('Please input --help for help.');
      readln;
-     halt;
+     exit;
     end;
    inc(i);
   end;
@@ -880,7 +937,7 @@ begin
    writeln('No parameter,enter the help of the program.');
    unild_help;
    readln;
-   halt;
+   exit;
   end;
  if(InputArchitecture<>0) then Script.InputArchitecture:=InputArchitecture;
  if(InputBits<>0) then Script.InputBits:=InputBits;
@@ -901,6 +958,10 @@ begin
  else if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
  Script:=unild_generate_default_other_file
  else Script:=unild_generate_default_elf_file;
+ if(Script.BaseAddress<>0) and (Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) then
+  begin
+   Script.NoFixedAddress:=false; Script.Interpreter:='';
+  end;
  if(unild_check_path(Script.OutputFileName)=false) then
   begin
    writeln('ERROR:Output File Name '+Script.OutputFileName+' is not vaild due to path invaild.');
@@ -920,25 +981,6 @@ begin
    halt;
   end;
  if(Script.IsUntypedBinary) then Script.EntryAsStartOfSection:=true;
- if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) and
- ((Script.elfclass=unild_class_sharedobject) or (Script.elfclass=unild_class_relocatable)
- or(Script.elfclass=unild_class_core)) then
-  begin
-   Script.Interpreter:='';
-  end;
- if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
-  begin
-   Script.Interpreter:=''; Script.NoExternalLibrary:=true;
-  end;
- if(Script.IsEFIFile) then
-  begin
-   if(Script.FileAlign=0) then
-    begin
-     writeln('ERROR:EFI File Align not specified.');
-     readln;
-     halt;
-    end;
-  end;
  if(Script.DynamicPathWithSubDirectoryCount>0) then
   begin
    for i:=1 to Script.DynamicPathWithSubDirectoryCount do
@@ -953,6 +995,30 @@ begin
     end;
    SetLength(Script.DynamicPathWithSubDirectoryList,0);
    Script.DynamicPathWithSubDirectoryCount:=0;
+  end;
+ for i:=1 to Script.DynamicCount do
+  begin
+   for j:=i+1 to Script.DynamicCount do
+    begin
+     if(ExtractFileName(Script.DynamicLibrary[i-1])=ExtractFileName(Script.DynamicLibrary[j-1])) then
+      begin
+       writeln('ERROR:Dynamic Library Name '+Script.DynamicLibrary[i-1]+' repeated.');
+       readln;
+       halt;
+      end;
+    end;
+  end;
+ for i:=1 to Script.DynamicPathCount do
+  begin
+   for j:=i+1 to Script.DynamicPathCount do
+    begin
+     if(Script.DynamicLibraryPath[i-1]=Script.DynamicLibraryPath[j-1]) then
+      begin
+       writeln('ERROR:Dynamic Library Search Path '+Script.DynamicLibraryPath[i-1]+' repeated.');
+       readln;
+       halt;
+      end;
+    end;
   end;
  if(Script.DynamicPathCount>0) then
   begin
@@ -975,32 +1041,33 @@ begin
       end;
     end;
   end;
- if(Script.NoExternalLibrary=false) and (Script.NoFixedAddress=true)
- and(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false)
- and(Script.elfclass<>unild_class_relocatable) then
+ if(Script.NoFixedAddress=false) then
   begin
-   if(Script.Interpreter='') then
+   if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) then
+    begin
+     if(Script.elfclass<>unild_class_executable) then
+      begin
+       writeln('ERROR:Only ELF Executable can be fixed-addressable.');
+       readln;
+       halt;
+      end;
+    end;
+  end;
+ if(Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) then
+  begin
+   if(Script.Interpreter='') and (Script.elfclass=unild_class_executable) and (Script.NoFixedAddress)
+   and(Script.NoExternalLibrary=false) then
     begin
      writeln('ERROR:Interpreter Path not specified.');
      readln;
      halt;
-    end;
-   if(Script.DynamicCount=0) then
-    begin
-     writeln('ERROR:Demanding Dynamic Library not specified.');
-     readln;
-     halt;
-    end;
-   if(Script.DynamicPathCount=0) then
-    begin
-     writeln('ERROR:Dynamic Library Search Path specified.');
-     readln;
-     halt;
-    end;
+    end
+   else if(Script.elfclass<>unild_class_executable) then Script.Interpreter:='';
   end
  else
   begin
    Script.Interpreter:=''; Script.DynamicCount:=0; Script.DynamicPathCount:=0;
+   Script.NoExternalLibrary:=true; Script.NoFixedAddress:=true;
   end;
  {Then Input the File}
  unifile_filelist_initialize;
@@ -1008,6 +1075,15 @@ begin
  if(Verbose) then writeln('Reading the input files......');
  for i:=1 to Script.InputFileCount do
   begin
+   for j:=i+1 to Script.InputFileCount do
+    begin
+     if(Script.InputFile[i-1]=Script.InputFile[j-1]) then
+      begin
+       writeln('ERROR:File Name '+Script.InputFile[i-1]+' repeated.');
+       readln;
+       halt;
+      end;
+    end;
    tempstr:=LowerCase(ExtractFileExt(Script.InputFile[i-1]));
    if(tempstr='.o')or (tempstr='.obj') then
     begin
@@ -1016,6 +1092,18 @@ begin
    else if(tempstr='.a')or (tempstr='.lib') or (tempstr='.lib') then
     begin
      unifile_total_add_archive_file(InputFileList,unifile_read_archive_file(Script.InputFile[i-1]));
+    end;
+  end;
+ for i:=1 to Script.InputFilePathCount do
+  begin
+   for j:=i+1 to Script.InputFilePathCount do
+    begin
+     if(Script.InputFilePath[i-1]=Script.InputFilePath[j-1]) then
+      begin
+       writeln('ERROR:File Path '+Script.InputFilePath[i-1]+' repeated.');
+       readln;
+       halt;
+      end;
     end;
   end;
  for i:=1 to Script.InputFilePathCount do
@@ -1094,7 +1182,12 @@ begin
    readln;
    halt;
   end;
- unihash_initialize;
+ if(Script.NoFixedAddress) and (unifile_total_check_relocatable(InputFileList)=false) then
+  begin
+   writeln('ERROR:The Input Files should be relocatable while some files in the input are not.');
+   readln;
+   halt;
+  end;
  if(Verbose) then writeln('Parsing the input files......');
  ParseFileList:=unifile_parse(InputFileList);
  if(Verbose) then writeln('Reprasing the input files......');
