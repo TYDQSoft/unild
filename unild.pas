@@ -283,8 +283,9 @@ var InputFileList:unifile_elf_object_file_total;
     FileList:unild_filelist;
     {For Scanning}
     i,j,k:SizeUint;
-    tempstr:string;
+    tempstr,tempstr2:string;
     tempvalue:SizeUint;
+    TempHaveLibrary:boolean;
     {For Linking}
     LinkerScript:string='';
     InputArchitecture:word=0;
@@ -384,9 +385,7 @@ begin
        else if(length(tempstr)>2) then
         begin
          if(FileExists(tempstr)) and (Script.Interpreter='') then
-          begin
-           Script.Interpreter:=tempstr;
-          end
+         Script.Interpreter:=tempstr
          else
           begin
            inc(j); continue;
@@ -401,8 +400,7 @@ begin
    or(LowerCase(ParamStr(i))='--output-filename')
    or(LowerCase(ParamStr(i))='--outputfilename') or (LowerCase(ParamStr(i))='--output') then
     begin
-     OutputFileName:=ParamStr(i+1);
-     inc(i);
+     OutputFileName:=ParamStr(i+1); inc(i);
     end
    else if(LowerCase(ParamStr(i))='--input-file') or (LowerCase(ParamStr(i))='--inputfile')
    or (LowerCase(ParamStr(i))='--input') then
@@ -414,6 +412,9 @@ begin
        if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
        else if(length(tempstr)>2) then
         begin
+         if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+         ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+         tempstr:=Copy(tempstr,2,length(tempstr)-2);
          inc(Script.InputFileCount);
          SetLength(Script.InputFile,Script.InputFileCount);
          Script.InputFile[Script.InputFileCount-1]:=ParamStr(j);
@@ -434,6 +435,9 @@ begin
        if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
        else if(length(tempstr)>2) then
         begin
+         if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+         ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+         tempstr:=Copy(tempstr,2,length(tempstr)-2);
          inc(Script.InputFilePathCount);
          SetLength(Script.InputFilePath,Script.InputFilePathCount);
          SetLength(Script.InputFileHaveSubPath,Script.InputFilePathCount);
@@ -463,6 +467,9 @@ begin
        if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
        else if(length(tempstr)>2) then
         begin
+         if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+         ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+         tempstr:=Copy(tempstr,2,length(tempstr)-2);
          inc(Script.InputFilePathCount);
          SetLength(Script.InputFilePath,Script.InputFilePathCount);
          SetLength(Script.InputFileHaveSubPath,Script.InputFilePathCount);
@@ -486,9 +493,24 @@ begin
        if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
        else if(length(tempstr)>2) then
         begin
-         inc(Script.DynamicCount);
-         SetLength(Script.DynamicLibrary,Script.DynamicCount);
-         Script.DynamicLibrary[Script.DynamicCount-1]:=tempstr;
+         if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+         ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+         tempstr:=Copy(tempstr,2,length(tempstr)-2);
+         tempstr2:=ExtractFileName(tempstr);
+         inc(Script.DynamicLibraryCount);
+         SetLength(Script.DynamicLibrary,Script.DynamicLibraryCount);
+         Script.DynamicLibrary[Script.DynamicLibraryCount-1]:=tempstr2;
+         if(tempstr<>tempstr2) then
+          begin
+           tempstr:=Copy(tempstr,1,length(tempstr)-length(tempstr2)-1);
+           if(tempstr='') then
+            begin
+             inc(j); continue;
+            end;
+           inc(Script.DynamicLibraryPathCount);
+           SetLength(Script.DynamicLibraryPath,Script.DynamicLibraryPathCount);
+           Script.DynamicLibraryPath[Script.DynamicLibraryPathCount-1]:=tempstr;
+          end;
         end
        else break;
        inc(j);
@@ -511,9 +533,12 @@ begin
        if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
        else if(length(tempstr)>2) then
         begin
-         inc(Script.DynamicPathCount);
-         SetLength(Script.DynamicLibraryPath,Script.DynamicPathCount);
-         Script.DynamicLibraryPath[Script.DynamicPathCount-1]:=ParamStr(j);
+         if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+         ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+         tempstr:=Copy(tempstr,2,length(tempstr)-2);
+         inc(Script.DynamicLibraryPathCount);
+         SetLength(Script.DynamicLibraryPath,Script.DynamicLibraryPathCount);
+         Script.DynamicLibraryPath[Script.DynamicLibraryPathCount-1]:=tempstr;
         end
        else break;
        inc(j);
@@ -540,6 +565,9 @@ begin
        if(length(tempstr)>2) and (Copy(tempstr,1,2)='--') then break
        else if(length(tempstr)>2) then
         begin
+         if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+         ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+         tempstr:=Copy(tempstr,2,length(tempstr)-2);
          inc(Script.DynamicPathWithSubDirectoryCount);
          SetLength(Script.DynamicPathWithSubDirectoryList,Script.DynamicPathWithSubDirectoryCount);
          Script.DynamicPathWithSubDirectoryList[Script.DynamicPathWithSubDirectoryCount-1]:=tempstr;
@@ -716,6 +744,9 @@ begin
    or(LowerCase(ParamStr(i))='--inputarchitecture') then
     begin
      tempstr:=LowerCase(ParamStr(i+1));
+     if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+     ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+     tempstr:=Copy(tempstr,2,length(tempstr)-2);
      if(tempstr='i386') or (tempstr='ia32') then
       begin
        InputArchitecture:=elf_machine_386; InputBits:=32;
@@ -769,6 +800,9 @@ begin
    or(LowerCase(ParamStr(i))='--outputarchitecture') then
     begin
      tempstr:=LowerCase(ParamStr(i+1));
+     if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+     ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+     tempstr:=Copy(tempstr,2,length(tempstr)-2);
      if(tempstr='i386') or (tempstr='ia32') then
       begin
        OutputArchitecture:=elf_machine_386; OutputBits:=32;
@@ -815,7 +849,11 @@ begin
    or(LowerCase(ParamStr(i))='--entry-name')or(LowerCase(ParamStr(i))='--entry-symbol')
    or(LowerCase(ParamStr(i))='--entrysymbol') then
     begin
-     Script.EntryName:=LowerCase(ParamStr(i+1)); inc(i);
+     tempstr:=ParamStr(i+1);
+     if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+     ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+     tempstr:=Copy(tempstr,2,length(tempstr)-2);
+     Script.EntryName:=tempstr; inc(i);
     end
    else if(LowerCase(ParamStr(i))='--script-path') or
    (LowerCase(ParamStr(i))='--scriptpath') or
@@ -825,7 +863,29 @@ begin
    (LowerCase(ParamStr(i))='--linker-script') or
    (LowerCase(ParamStr(i))='--linkerscript') then
     begin
-     LinkerScript:=ParamStr(i+1); inc(i);
+     j:=i+1;
+     while(j<=ParamCount)do
+      begin
+       tempstr:=ParamStr(j);
+       if(length(tempstr)<=2) then break
+       else if(length(tempstr)>2) then
+        begin
+         if(Copy(tempstr,1,2)='--') then
+          begin
+           inc(j); break;
+          end;
+         if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+         ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+         tempstr:=Copy(tempstr,2,length(tempstr)-2);
+         if(FileExists(tempstr)) and (LinkerScript='') then LinkerScript:=tempstr
+         else
+          begin
+           inc(j); continue;
+          end;
+        end;
+       inc(j);
+      end;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--script-path-default') or
    (LowerCase(ParamStr(i))='--scriptpath-default') or
@@ -852,7 +912,11 @@ begin
     end
    else if(LowerCase(ParamStr(i))='--got-alias') or (LowerCase(ParamStr(i))='--gotalias') then
     begin
-     Script.GlobalOffsetTableAlias:=ParamStr(i+1); inc(i);
+     tempstr:=ParamStr(i+1);
+     if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+     ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+     tempstr:=Copy(tempstr,2,length(tempstr)-2);
+     Script.GlobalOffsetTableAlias:=tempstr; inc(i);
     end
    else if(LowerCase(ParamStr(i))='--dynamic-enable') or (LowerCase(ParamStr(i))='--dynamicenable') then
     begin
@@ -860,7 +924,11 @@ begin
     end
    else if(LowerCase(ParamStr(i))='--dynamic-alias') or (LowerCase(ParamStr(i))='--dynamicalias') then
     begin
-     Script.DynamicSectionAlias:=ParamStr(i+1); inc(i);
+     tempstr:=ParamStr(i+1);
+     if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+     ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
+     tempstr:=Copy(tempstr,2,length(tempstr)-2);
+     Script.DynamicSectionAlias:=tempstr; inc(i);
     end
    else if(LowerCase(ParamStr(i))='--version-enable') or (LowerCase(ParamStr(i))='--versionenable')
    or(LowerCase(ParamStr(i))='--ver-enable') or (LowerCase(ParamStr(i))='--verenable') then
@@ -988,19 +1056,19 @@ begin
      FileList:=unild_search_for_directorylist(Script.DynamicPathWithSubDirectoryList[i-1],true);
      for j:=1 to FileList.Count do
       begin
-       inc(Script.DynamicPathCount);
-       SetLength(Script.DynamicLibraryPath,Script.DynamicPathCount);
-       Script.DynamicLibraryPath[Script.DynamicPathCount-1]:=FileList.FilePath[j-1];
+       inc(Script.DynamicLibraryPathCount);
+       SetLength(Script.DynamicLibraryPath,Script.DynamicLibraryPathCount);
+       Script.DynamicLibraryPath[Script.DynamicLibraryPathCount-1]:=FileList.FilePath[j-1];
       end;
     end;
    SetLength(Script.DynamicPathWithSubDirectoryList,0);
    Script.DynamicPathWithSubDirectoryCount:=0;
   end;
- for i:=1 to Script.DynamicCount do
+ for i:=1 to Script.DynamicLibraryCount do
   begin
-   for j:=i+1 to Script.DynamicCount do
+   for j:=i+1 to Script.DynamicLibraryCount do
     begin
-     if(ExtractFileName(Script.DynamicLibrary[i-1])=ExtractFileName(Script.DynamicLibrary[j-1])) then
+     if(Script.DynamicLibrary[i-1]=Script.DynamicLibrary[j-1]) then
       begin
        writeln('ERROR:Dynamic Library Name '+Script.DynamicLibrary[i-1]+' repeated.');
        readln;
@@ -1008,9 +1076,9 @@ begin
       end;
     end;
   end;
- for i:=1 to Script.DynamicPathCount do
+ for i:=1 to Script.DynamicLibraryPathCount do
   begin
-   for j:=i+1 to Script.DynamicPathCount do
+   for j:=i+1 to Script.DynamicLibraryPathCount do
     begin
      if(Script.DynamicLibraryPath[i-1]=Script.DynamicLibraryPath[j-1]) then
       begin
@@ -1020,25 +1088,29 @@ begin
       end;
     end;
   end;
- if(Script.DynamicPathCount>0) then
+ for i:=1 to Script.DynamicLibraryCount do
   begin
-   for i:=1 to Script.DynamicPathCount do
+   TempHaveLibrary:=false; j:=1;
+   for j:=1 to Script.DynamicLibraryPathCount do
     begin
-     FileList:=unild_search_for_filelist(Script.DynamicPathWithSubDirectoryList[i-1],'*.so',false);
-     for j:=1 to FileList.Count do
+     if(FileExists(Script.DynamicLibraryPath[j-1]+'/'+Script.DynamicLibrary[i-1])) then
       begin
-       k:=1;
-       while(k<=Script.DynamicCount)do
-        begin
-         if(ExtractFileName(FileList.FilePath[j-1])=Script.DynamicLibrary[k-1]) then break;
-         inc(k);
-        end;
-       if(k>Script.DynamicCount) then continue;
-       inc(Script.DynamicLibraryPathNameCount);
-       SetLength(Script.DynamicLibraryPathName,Script.DynamicLibraryPathNameCount);
-       Script.DynamicLibraryPathName[Script.DynamicLibraryPathNameCount-1]:=
-       FileList.FilePath[j-1];
+       TempHaveLibrary:=true; break;
       end;
+    end;
+   if(TempHaveLibrary=false) then
+    begin
+     writeln('ERROR:The specified library '+Script.DynamicLibrary[i-1]+' does not exist in the '+
+     'specified search path or search paths.');
+     readln;
+     halt;
+    end
+   else
+    begin
+     inc(Script.DynamicLibraryActualPathCount);
+     SetLength(Script.DynamicLibraryActualPath,Script.DynamicLibraryActualPathCount);
+     Script.DynamicLibraryActualPath[Script.DynamicLibraryActualPathCount-1]:=
+     Script.DynamicLibraryPath[j-1]+'/'+Script.DynamicLibrary[i-1];
     end;
   end;
  if(Script.NoFixedAddress=false) then
@@ -1062,11 +1134,14 @@ begin
      readln;
      halt;
     end
-   else if(Script.elfclass<>unild_class_executable) then Script.Interpreter:='';
+   else if(Script.elfclass<>unild_class_executable) then
+    begin
+     Script.Interpreter:=''; Script.DynamicLibraryActualPathCount:=0;
+    end;
   end
  else
   begin
-   Script.Interpreter:=''; Script.DynamicCount:=0; Script.DynamicPathCount:=0;
+   Script.Interpreter:=''; Script.DynamicLibraryCount:=0; Script.DynamicLibraryPathCount:=0;
    Script.NoExternalLibrary:=true; Script.NoFixedAddress:=true;
   end;
  {Then Input the File}

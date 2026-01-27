@@ -2,7 +2,7 @@
 	#Parameter ARCH means output Architecture,and Parameter CROSSARCH means cross-compile the unild software to the target architecture which bash build.sh needs for executing and compiling.If you demand have custom binutils to compile,you ought to specified the custom binutils after cross-compile architecture parameter(due to usage of the custom binutils should be used in the cross-compile level). Source Path is the path to Free Pascal Compiler Source Code with including the object files compiled and compiled compilers.
 	ARCH=$(uname -m)
 	USERNAME=$(whoami)
-	SOURCEPATH=/home/$USERNAME/source
+	SOURCEPATH=/home/$USERNAME/source-with-cross-compiler
 	CROSSARCH=$1
 	CUSTOMBIN=$2
 	if [ "$ARCH" = "x86_64" ]; then

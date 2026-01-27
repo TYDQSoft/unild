@@ -38,15 +38,15 @@ type unild_item=packed record
                   LinkAll:boolean;
                   NoSymbol:boolean;
                   NoExecutableStack:boolean;
-                  NoGotWritable:boolean;
+                  GotAuthority:byte;
                   NoExternalLibrary:boolean;
                   IsEFIFile:boolean;
                   EFIFileIndex:byte;
                   SharedLibraryName:string;
                   DynamicLibraryPath:array of string;
-                  DynamicPathCount:SizeUint;
+                  DynamicLibraryPathCount:SizeUint;
                   DynamicLibrary:array of string;
-                  DynamicCount:SizeUint;
+                  DynamicLibraryCount:SizeUint;
                   NoDefaultLibrary:boolean;
                   NoFixedAddress:boolean;
                   elfclass:byte;
@@ -77,11 +77,16 @@ type unild_item=packed record
                   DebugSwitch:boolean;
                   VersionSwitch:boolean;
                   EntryAsStartOfSection:boolean;
+                  {For Implicit Address of Output File}
+                  ImplicitName:array of string;
+                  ImplicitAddress:array of SizeUint;
+                  ImplicitCount:SizeUint;
                   {Temporary Variables}
                   DynamicPathWithSubDirectoryList:array of string;
                   DynamicPathWithSubDirectoryCount:SizeUint;
-                  DynamicLibraryPathName:array of string;
-                  DynamicLibraryPathNameCount:SizeUint;
+                  {For Actually Library Path Name}
+                  DynamicLibraryActualPath:array of string;
+                  DynamicLibraryActualPathCount:SizeUInt;
                   end;
      unild_line_item=packed record
                      Item:array of string;
@@ -107,6 +112,10 @@ const unild_item_offset:byte=0;
       unild_class_bootdriver=2;
       unild_class_runtimedriver=3;
       unild_class_rom=4;
+      {For ELF Format File Global Offset Table Writable}
+      unild_readonly_got=2;
+      unild_writable_got=1;
+      unild_unchecked_got=0;
 
 var ScriptEnable:boolean=false;
     Script:unild_script;
@@ -125,26 +134,26 @@ procedure unild_initialize;
 begin
  ScriptEnable:=true;
  Script.NoSymbol:=false; Script.BaseAddress:=0;
- Script.DynamicCount:=0; Script.DynamicPathCount:=0; Script.EFIFileIndex:=0;
+ Script.DynamicLibraryCount:=0; Script.DynamicLibraryPathCount:=0; Script.EFIFileIndex:=0;
  Script.elfclass:=0; Script.Interpreter:='';
  Script.InterpreterDynamicLinkFunction:='_dl_runtime_resolve';
  Script.InputFilePathCount:=0; Script.InputFileCount:=0;
- Script.EntryName:=''; Script.FileAlign:=0; Script.NoDefaultLibrary:=false;
+ Script.EntryName:=''; Script.FileAlign:=$1000; Script.NoDefaultLibrary:=false;
  Script.NoExternalLibrary:=false; Script.NoSymbol:=false; Script.NoFixedAddress:=true;
  Script.SectionCount:=0; Script.SystemIndex:=0; Script.SmartLinking:=false; Script.LinkAll:=true;
- Script.NoExecutableStack:=false; Script.NoGotWritable:=false;
+ Script.NoExecutableStack:=false; Script.GotAuthority:=unild_writable_got;
  Script.InputArchitecture:=0; Script.OutputArchitecture:=0;
  Script.InputBits:=0; Script.OutputBits:=0;
  Script.IsUntypedBinary:=false; Script.UntypedBinaryAlign:=0; Script.UntypedBinaryAddressable:=false;
  Script.DynamicPathWithSubDirectoryCount:=0;
  Script.EnableFileInformation:=true; Script.EnableSectionInformation:=true;
- Script.DynamicSectionAlias:='_DYNAMIC';
+ Script.DynamicSectionAlias:='_DYNAMIC'; Script.SectionCountExtra:=0;
  Script.DynamicSectionEnable:=false; Script.DynamicSectionIndex:=0;
  Script.GlobalOffsetTableAlias:='_GLOBAL_OFFSET_TABLE_';
  Script.GlobalOffsetTableSectionEnable:=false; Script.GlobalOffsetTableSectionIndex:=0;
  Script.DebugSwitch:=false; Script.VersionSwitch:=false;
- Script.DynamicLibraryPathNameCount:=0; Script.EntryAsStartOfSection:=false;
- Script.OutputFileName:='';
+ Script.EntryAsStartOfSection:=false; Script.OutputFileName:=''; Script.ImplicitCount:=0;
+ Script.DynamicLibraryActualPathCount:=0;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -158,6 +167,10 @@ begin
  if(Copy(str,1,2)='0x') or (Copy(str,1,2)='0x') then
   begin
    StartPoint:=3; BitSize:=16;
+  end
+ else if(Copy(str,1,2)='0b') or (Copy(Str,1,2)='0B') then
+  begin
+   StartPoint:=3; BitSize:=2;
   end
  else if(str[1]='x') then
   begin
@@ -482,10 +495,11 @@ var StrList:TStringList;
     {For Scanning the Content}
     LineList:unild_line;
     tempstr:string;
-    i,j,k,row,len:SizeUint;
+    i,j,k,m,row,len:SizeUint;
     {For Content to the Linker Data}
     BracketLayer:byte;
-    tempstr1,tempstr2:string;
+    tempstr1,tempstr2,tempstr3:string;
+    tempvalue:SizeUint;
 begin
  {Transform the Data to String}
  StrList:=TStringList.Create;
@@ -643,10 +657,10 @@ begin
  i:=1; j:=1;
  Result.EntryName:=''; Result.Interpreter:=''; Result.NoDefaultLibrary:=false; Result.Symbolic:=false;
  Result.elfclass:=unild_class_executable; Result.IsEFIFile:=false; Result.EFIFileIndex:=0;
- Result.DynamicPathCount:=0; Result.NoSymbol:=false; Result.NoExternalLibrary:=false;
- Result.SectionCount:=0; Result.InputFileCount:=0; Result.DynamicCount:=0;
+ Result.DynamicLibraryPathCount:=0; Result.NoSymbol:=false; Result.NoExternalLibrary:=false;
+ Result.SectionCount:=0; Result.InputFileCount:=0; Result.DynamicLibraryCount:=0;
  Result.BaseAddress:=0; Result.NoFixedAddress:=true; Result.SystemIndex:=0;
- Result.NoExecutableStack:=false; Result.NoGotWritable:=false;
+ Result.NoExecutableStack:=false; Result.GotAuthority:=unild_writable_got;
  if(ScriptEnable) then Result:=Script;
  while(i<=LineList.LineCount)do
   begin
@@ -679,10 +693,24 @@ begin
        Result.EnableSectionInformation:=false;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='nogotwritable') or
-     (LowerCase(LineList.Line[i-1].Item[0])='gotnotwriteable') or
-     (LowerCase(LineList.Line[i-1].Item[0])='nowritable') then
+     (LowerCase(LineList.Line[i-1].Item[0])='gotnotwritable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='got_notwritable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='got_readonly') or
+     (LowerCase(LineList.Line[i-1].Item[0])='gotreadonly') then
       begin
-       Result.NoGotWritable:=true;
+       Result.GotAuthority:=unild_readonly_got;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='gotwritable') or
+     (LowerCase(LineList.Line[i-1].Item[0])='got_writable') then
+      begin
+       Result.GotAuthority:=unild_writable_got;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='gotnocheck') or
+     (LowerCase(LineList.Line[i-1].Item[0])='got_nocheck') or
+     (LowerCase(LineList.Line[i-1].Item[0])='nocheckgot') or
+     (LowerCase(LineList.Line[i-1].Item[0])='nocheck_got') then
+      begin
+       Result.GotAuthority:=unild_unchecked_got;
       end
      else if(LowerCase(LineList.Line[i-1].Item[0])='nodeflib') or
      (LowerCase(LineList.Line[i-1].Item[0])='nodefaultlib') or
@@ -881,7 +909,7 @@ begin
      else if(LowerCase(LineList.Line[i-1].Item[0])='filealign')
      or(LowerCase(LineList.Line[i-1].Item[0])='file_align') then
       begin
-       if(LineList.Line[i-1].Count=4) and (Result.FileAlign=0) then
+       if(LineList.Line[i-1].Count=4) then
         begin
          tempstr1:=LineList.Line[i-1].Item[2];
          Result.FileAlign:=unild_script_str_to_int(tempstr1);
@@ -889,7 +917,7 @@ begin
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:File Align must be filealign(alignvalue) and not define at least twice.');
+         writeln('ERROR:File Align must be filealign(alignvalue).');
          readln;
          halt;
         end;
@@ -898,7 +926,7 @@ begin
      or(LowerCase(LineList.Line[i-1].Item[0])='untypedbinary_align')
      or(LowerCase(LineList.Line[i-1].Item[0])='untyped_binary_align')then
       begin
-       if(LineList.Line[i-1].Count=4) and (Result.UntypedBinaryAlign=0) then
+       if(LineList.Line[i-1].Count=4) then
         begin
          tempstr1:=LineList.Line[i-1].Item[2];
          Result.IsUntypedBinary:=true;
@@ -917,7 +945,7 @@ begin
      or(LowerCase(LineList.Line[i-1].Item[0])='startaddress')
      or(LowerCase(LineList.Line[i-1].Item[0])='start_address') then
       begin
-       if(LineList.Line[i-1].Count=4) and (Result.BaseAddress=0) then
+       if(LineList.Line[i-1].Count=4) then
         begin
          tempstr1:=LineList.Line[i-1].Item[2];
          Result.BaseAddress:=unild_script_str_to_int(tempstr1);
@@ -926,8 +954,8 @@ begin
        else
         begin
          writeln('ERROR in Column '+IntToStr(i)+', Row 1');
-         writeln('ERROR:Base Address must be baseaddress/base_address/startaddress/start_address(address)'+
-         ' and not define at least twice.');
+         writeln('ERROR:Base Address must be baseaddress/base_address/startaddress/start_address'+
+         '(address).');
          readln;
          halt;
         end;
@@ -975,14 +1003,12 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) then
-            begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-             Result.Interpreter:=Copy(tempstr1,2,length(tempstr1)-2)
-             else Result.Interpreter:=tempstr1;
-            end
-           else Result.Interpreter:=tempstr1;
-           if(FileExists(Result.Interpreter)) then break;
+           if(length(tempstr1)>=2) and (((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+           ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+           Result.Interpreter:=tempstr1;
+           if(FileExists(Result.Interpreter)) then break
+           else Result.Interpreter:='';
            j:=k+1;
           end;
         end
@@ -1014,13 +1040,10 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) then
-            begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-             Result.InterpreterDynamicLinkFunction:=Copy(tempstr1,2,length(tempstr1)-2)
-             else Result.InterpreterDynamicLinkFunction:=tempstr1;
-            end
-           else Result.InterpreterDynamicLinkFunction:=tempstr1;
+           if(length(tempstr1)>=2) and (((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+           ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+           Result.InterpreterDynamicLinkFunction:=tempstr1;
            j:=k+1;
           end;
         end
@@ -1053,27 +1076,24 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) then
+           if(length(tempstr1)>=2) and (((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
+           ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+           tempstr3:=ExtractFileName(tempstr1);
+           inc(Result.DynamicLibraryCount);
+           SetLength(Result.DynamicLibrary,Result.DynamicLibraryCount);
+           Result.DynamicLibrary[Result.DynamicLibraryCount-1]:=ExtractFileName(tempstr3);
+           if(tempstr1<>tempstr3) then
             begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
+             tempstr1:=Copy(tempstr1,1,length(tempstr1)-length(tempstr3)-1);
+             if(tempstr1<>'') then
               begin
-               inc(Result.DynamicCount);
-               SetLength(Result.DynamicLibrary,Result.DynamicCount);
-               Result.DynamicLibrary[Result.DynamicCount-1]:=
-               ExtractFileName(Copy(tempstr1,2,length(tempstr1)-2));
-              end
-             else
-              begin
-               inc(Result.DynamicCount);
-               SetLength(Result.DynamicLibrary,Result.DynamicCount);
-               Result.DynamicLibrary[Result.DynamicCount-1]:=ExtractFileName(tempstr1);
+               j:=k+1; continue;
               end;
-            end
-           else
-            begin
-             inc(Result.DynamicCount);
-             SetLength(Result.DynamicLibrary,Result.DynamicCount);
-             Result.DynamicLibrary[Result.DynamicCount-1]:=ExtractFileName(tempstr1);
+             inc(Result.DynamicLibraryPathCount);
+             SetLength(Result.DynamicLibraryPath,Result.DynamicLibraryPathCount);
+             Result.DynamicLibraryPath[Result.DynamicLibraryPathCount-1]:=
+             tempstr1;
             end;
            j:=k+1;
           end;
@@ -1111,28 +1131,12 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) then
-            begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-              begin
-               inc(Result.DynamicPathCount);
-               SetLength(Result.DynamicLibraryPath,Result.DynamicPathCount);
-               Result.DynamicLibraryPath[Result.DynamicPathCount-1]:=
-               Copy(tempstr1,2,length(tempstr1)-2);
-              end
-             else
-              begin
-               inc(Result.DynamicPathCount);
-               SetLength(Result.DynamicLibraryPath,Result.DynamicPathCount);
-               Result.DynamicLibraryPath[Result.DynamicPathCount-1]:=tempstr1;
-              end;
-            end
-           else
-            begin
-             inc(Result.DynamicCount);
-             SetLength(Result.DynamicLibraryPath,Result.DynamicPathCount);
-             Result.DynamicLibraryPath[Result.DynamicPathCount-1]:=tempstr1;
-            end;
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+           inc(Result.DynamicLibraryCount);
+           SetLength(Result.DynamicLibraryPath,Result.DynamicLibraryPathCount);
+           Result.DynamicLibraryPath[Result.DynamicLibraryPathCount-1]:=tempstr1;
            j:=k+1;
           end;
         end
@@ -1166,34 +1170,14 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) then
-            begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-              begin
-               inc(Result.DynamicPathWithSubDirectoryCount);
-               SetLength(Result.DynamicPathWithSubDirectoryList,
-               Result.DynamicPathWithSubDirectoryCount);
-               Result.DynamicPathWithSubDirectoryList[
-               Result.DynamicPathWithSubDirectoryCount-1]:=
-               Copy(tempstr1,2,length(tempstr1)-2);
-              end
-             else
-              begin
-               inc(Result.DynamicPathWithSubDirectoryCount);
-               SetLength(Result.DynamicPathWithSubDirectoryList,
-               Result.DynamicPathWithSubDirectoryCount);
-               Result.DynamicPathWithSubDirectoryList[
-               Result.DynamicPathWithSubDirectoryCount-1]:=tempstr1;
-              end;
-            end
-           else
-            begin
-             inc(Result.DynamicPathWithSubDirectoryCount);
-             SetLength(Result.DynamicPathWithSubDirectoryList,
-             Result.DynamicPathWithSubDirectoryCount);
-             Result.DynamicPathWithSubDirectoryList[
-             Result.DynamicPathWithSubDirectoryCount-1]:=tempstr1;
-            end;
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+           inc(Result.DynamicPathWithSubDirectoryCount);
+           SetLength(Result.DynamicPathWithSubDirectoryList,
+           Result.DynamicPathWithSubDirectoryCount);
+           Result.DynamicPathWithSubDirectoryList[
+           Result.DynamicPathWithSubDirectoryCount-1]:=tempstr1;
            j:=k+1;
           end;
         end
@@ -1366,14 +1350,10 @@ begin
        if(LineList.Line[i-1].Count=4) then
         begin
          tempstr1:=LowerCase(LineList.Line[i-1].Item[2]);
-         if(length(tempstr1)>=2) then
-          begin
-           if(tempstr1[1]='"') or (tempstr1[1]=#39) then
-           Result.OutputFileName:=Copy(tempstr1,2,length(tempstr1)-2)
-           else
-           Result.OutputFileName:=tempstr1;
-          end
-         else Result.OutputFileName:=tempstr1;
+         if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+         ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
+         tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
+         Result.OutputFileName:=tempstr1;
         end
        else
         begin
@@ -1400,10 +1380,9 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>2) then
-            begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
-            end;
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            inc(Result.InputFileCount);
            SetLength(Result.InputFile,Result.InputFileCount);
            Result.InputFile[Result.InputFileCount-1]:=tempstr1;
@@ -1444,10 +1423,9 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>2) then
-            begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
-            end;
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            inc(Result.InputFilePathCount);
            SetLength(Result.InputFilePath,Result.InputFilePathCount);
            SetLength(Result.InputFileHaveSubPath,Result.InputFilePathCount);
@@ -1496,10 +1474,9 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>2) then
-            begin
-             if(tempstr1[1]='"') or (tempstr1[1]=#39) then tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
-            end;
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            inc(Result.InputFilePathCount);
            SetLength(Result.InputFilePath,Result.InputFilePathCount);
            SetLength(Result.InputFileHaveSubPath,Result.InputFilePathCount);
@@ -1522,6 +1499,78 @@ begin
          'input_path_withsub/input_file_path_withsub/input_filepath_withsub/'+
          'inputfilepathwithsub/inputpathwithsub/input_pathwithsub/input_file_pathwithsub'+
          'input_filepathwithsub(File Paths which contains object files).');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='implicit_section_address')
+     or(LowerCase(LineList.Line[i-1].Item[0])='implicitsection_address')
+     or(LowerCase(LineList.Line[i-1].Item[0])='implicitsectionaddress') then
+      begin
+       j:=3;
+       if(LineList.Line[i-1].Count>=6) then
+        begin
+         k:=j+1; tempstr1:=''; tempstr1:=''; m:=3;
+         while(j<=LineList.Line[i-1].Count)do
+          begin
+           tempstr1:=''; k:=j+1; m:=j;
+           while(k<=LineList.Line[i-1].Count)do
+            begin
+             if(LineList.Line[i-1].Item[k-1]=',') or (LineList.Line[i-1].Item[k-1]=')') then break;
+             tempstr1:=tempstr1+LineList.Line[i-1].Item[k-1];
+             inc(k);
+            end;
+           if(tempstr1='') then
+            begin
+             tempstr1:=tempstr1;
+             if(tempstr1='.strtab') or (tempstr1='.symtab') or (tempstr1='.shstrtab') then
+              begin
+               writeln('ERROR in Column ',i,',Row ',LineList.Line[i-1].Offset[j-1],':');
+               writeln('ERROR:Typed section '+tempstr1+' is specified section auto-generated and'+
+               'and it cannot to be changed,'+
+               'cannot change address with the Implicit Section Address Command.');
+               readln;
+               halt;
+              end
+             else if(tempstr1<>'.hash')and(tempstr1<>'.gnu.hash')and(tempstr1<>'.dynamic')
+             and(tempstr1<>'.dynsym')and(tempstr1<>'.dynstr')and(tempstr1<>'.got')
+             and(tempstr1<>'.got.plt')and(Copy(tempstr1,1,5)<>'.rela')and(Copy(tempstr1,1,5)<>'.relr')
+             and(Copy(tempstr1,1,4)<>'.rel')then
+              begin
+               writeln('ERROR in Column ',i,',Row ',LineList.Line[i-1].Offset[j-1],':');
+               writeln('ERROR:Typed section '+tempstr1+' is not the implicit section,'+
+               'cannot change its address with the Implicit Section Address Command.');
+               readln;
+               halt;
+              end;
+            end
+           else
+            begin
+             tempvalue:=unild_str_to_int(tempstr1);
+             inc(Script.ImplicitCount);
+             SetLength(Script.ImplicitName,Script.ImplicitCount);
+             SetLength(Script.ImplicitAddress,Script.ImplicitCount);
+             Script.ImplicitName[i-1]:=tempstr1;
+             Script.ImplicitAddress[i-1]:=tempvalue;
+             tempstr1:='';
+            end;
+           j:=k+1;
+          end;
+         if(tempstr1='') then
+          begin
+           writeln('ERROR in Column ',i,',Row ',LineList.Line[i-1].Offset[m-1],':');
+           writeln('ERROR:Typed section '+tempstr1+' address have not specified,must be specified '+
+           'when the implicit section name specified.');
+           readln;
+           halt;
+          end;
+        end
+       else
+        begin
+         writeln('ERROR in Column ',i,',Row '+IntToStr(LineList.Line[i-1].Offset[0])+':');
+         writeln('ERROR:Implicit Section Address(implicit_section_address/'
+         +'implicitsection_address/implicitsectionaddress(SectionName,SectionAddress,'+
+         '...(with Section Name and Section Address Pair)) have no enough parameters.');
          readln;
          halt;
         end;
@@ -1566,6 +1615,9 @@ begin
          else
           begin
            tempstr1:=unild_script_translate_string(LineList.Line[i-1].Item[j-1],true);
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
+           tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            if(Result.Section[Result.SectionCount-1].SectionName='')
            and((tempstr1='.hash')or(tempstr1='.gnu.hash') or
            (tempstr1='.symtab')or(tempstr1='.strtab')or(tempstr1='.shstrtab')or(tempstr1='.dynamic')
@@ -1579,7 +1631,7 @@ begin
             end
            else if(Result.IsEFIFile) and (length(tempstr1)>8) then
             begin
-             writeln('ERROR in Column '+IntToStr(i)+',Row '+IntToStr(LineList.Line[i-1].Offset[j])+':');
+             writeln('ERROR in Column '+IntToStr(i)+',Row '+IntToStr(LineList.Line[i-1].Offset[j-1])+':');
              writeln('Section Name '+tempstr1+' length exceeds 8,cannot generate this section in '+
              'the EFI File.');
              readln;
@@ -1621,7 +1673,7 @@ begin
           begin
            if(BracketLayer=0) then
             begin
-             writeln('ERROR in column '+IntToStr(j)+',row 1:');
+             writeln('ERROR in column '+IntToStr(j)+',Row '+IntToStr(LineList.Line[i-1].Offset[0])+':');
              writeln('Bracket not closed.');
              readln;
              halt;
@@ -1740,7 +1792,7 @@ begin
           end
          else if(BracketLayer>0) and (j=LineList.LineCount) then
           begin
-           writeln('ERROR in column '+IntToStr(j)+',row 1:');
+           writeln('ERROR in column '+IntToStr(j)+',Row '+IntToStr(LineList.Line[i-1].Offset[0])+':');
            writeln('ERROR:Bracket not closed.');
            readln;
            halt;
@@ -1776,9 +1828,10 @@ begin
  if(ScriptEnable) then Result:=Script;
  if(Script.DebugSwitch) then Result.SectionCount:=19 else Result.SectionCount:=13;
  if(Script.VersionSwitch) then inc(Result.SectionCount,3);
- SetLength(Result.Section,19);
+ SetLength(Result.Section,Result.SectionCount);
  i:=1;
  if(Result.EntryName='') then Result.EntryName:='_start';
+ if(Result.FileAlign=0) then Result.FileAlign:=$1000;
  {Set the Section .text,can be read and execute}
  Result.Section[i-1].SectionName:='.text';
  Result.Section[i-1].SectionAttributeCount:=2;
@@ -1790,20 +1843,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.text.*';
- inc(i);
- {Set the Section .init,can be read and execute}
- Result.Section[i-1].SectionName:='.init';
- Result.Section[i-1].SectionAttributeCount:=2;
- SetLength(Result.Section[i-1].SectionAttribute,2);
- Result.Section[i-1].SectionAttribute[0]:='read';
- Result.Section[i-1].SectionAttribute[1]:='execute';
- Result.Section[i-1].SectionItemCount:=1;
- SetLength(Result.Section[i-1].SectionItem,1);
- Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
- Result.Section[i-1].SectionItem[0].ItemCount:=1;
- SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.init.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.text*';
  inc(i);
  {Set the Section .init_array,can be read and execute}
  Result.Section[i-1].SectionName:='.init_array';
@@ -1816,10 +1856,10 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.init_array.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.init_array*';
  inc(i);
- {Set the Section .fini,can be read and execute}
- Result.Section[i-1].SectionName:='.fini';
+ {Set the Section .init,can be read and execute}
+ Result.Section[i-1].SectionName:='.init';
  Result.Section[i-1].SectionAttributeCount:=2;
  SetLength(Result.Section[i-1].SectionAttribute,2);
  Result.Section[i-1].SectionAttribute[0]:='read';
@@ -1829,7 +1869,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.fini.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.init*';
  inc(i);
  {Set the Section .fini_array,can be read and execute}
  Result.Section[i-1].SectionName:='.fini_array';
@@ -1842,7 +1882,20 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.fini_array.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.fini_array*';
+ inc(i);
+ {Set the Section .fini,can be read and execute}
+ Result.Section[i-1].SectionName:='.fini';
+ Result.Section[i-1].SectionAttributeCount:=2;
+ SetLength(Result.Section[i-1].SectionAttribute,2);
+ Result.Section[i-1].SectionAttribute[0]:='read';
+ Result.Section[i-1].SectionAttribute[1]:='execute';
+ Result.Section[i-1].SectionItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem,1);
+ Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+ Result.Section[i-1].SectionItem[0].ItemCount:=1;
+ SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.fini*';
  inc(i);
  {Set the Section .preinit_array,can be read and execute}
  Result.Section[i-1].SectionName:='.preinit_array';
@@ -1855,7 +1908,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.preinit_array.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.preinit_array*';
  inc(i);
  {Set the Section .rodata,can be readonly}
  Result.Section[i-1].SectionName:='.rodata';
@@ -1867,7 +1920,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.rodata.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.rodata*';
  inc(i);
  {Set the Section .data,can be read and write}
  Result.Section[i-1].SectionName:='.data';
@@ -1880,7 +1933,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.data.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.data*';
  inc(i);
  {Set the Section .sdata,can be read and write}
  Result.Section[i-1].SectionName:='.sdata';
@@ -1893,7 +1946,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sdata.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sdata*';
  inc(i);
  {Set the Section .bss,can be read and write}
  Result.Section[i-1].SectionName:='.bss';
@@ -1907,7 +1960,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.bss.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.bss*';
  inc(i);
  {Set the Section .sbss,can be read and write}
  Result.Section[i-1].SectionName:='.sbss';
@@ -1921,7 +1974,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sbss.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sbss*';
  inc(i);
  {Set the Section .tdata,can be read and write}
  Result.Section[i-1].SectionName:='.tdata';
@@ -1935,7 +1988,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.tdata.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.tdata*';
  inc(i);
  {Set the Section .tbss,can be read and write}
  Result.Section[i-1].SectionName:='.tdata';
@@ -1949,7 +2002,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.tbss.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.tbss*';
  inc(i);
  if(Script.DebugSwitch) then
   begin
@@ -1963,7 +2016,7 @@ begin
    Result.Section[i-1].SectionItem[0].ItemCount:=1;
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_frame.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_frame*';
    inc(i);
    {Set the Section .debug_info}
    Result.Section[i-1].SectionName:='.debug_info';
@@ -1975,7 +2028,19 @@ begin
    Result.Section[i-1].SectionItem[0].ItemCount:=1;
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_info.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_info*';
+   inc(i);
+   {Set the Section .debug_line}
+   Result.Section[i-1].SectionName:='.debug_line';
+   Result.Section[i-1].SectionAttributeCount:=0;
+   SetLength(Result.Section[i-1].SectionAttribute,0);
+   Result.Section[i-1].SectionItemCount:=1;
+   SetLength(Result.Section[i-1].SectionItem,1);
+   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
+   Result.Section[i-1].SectionItem[0].ItemCount:=1;
+   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
+   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_line*';
    inc(i);
    {Set the Section .debug_aranges}
    Result.Section[i-1].SectionName:='.debug_aranges';
@@ -1987,7 +2052,7 @@ begin
    Result.Section[i-1].SectionItem[0].ItemCount:=1;
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_aranges.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_aranges*';
    inc(i);
    {Set the Section .debug_ranges}
    Result.Section[i-1].SectionName:='.debug_ranges';
@@ -1999,22 +2064,10 @@ begin
    Result.Section[i-1].SectionItem[0].ItemCount:=1;
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_ranges.*';
-   inc(i);
-   {Set the Section .debug_line}
-   Result.Section[i-1].SectionName:='.debug_addrev';
-   Result.Section[i-1].SectionAttributeCount:=0;
-   SetLength(Result.Section[i-1].SectionAttribute,0);
-   Result.Section[i-1].SectionItemCount:=1;
-   SetLength(Result.Section[i-1].SectionItem,1);
-   Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
-   Result.Section[i-1].SectionItem[0].ItemKeep:=true;
-   Result.Section[i-1].SectionItem[0].ItemCount:=1;
-   SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_line.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_ranges*';
    inc(i);
    {Set the Section .debug_addrev}
-   Result.Section[i-1].SectionName:='.debug_addrev';
+   Result.Section[i-1].SectionName:='.debug_abbrev';
    Result.Section[i-1].SectionAttributeCount:=0;
    SetLength(Result.Section[i-1].SectionAttribute,0);
    Result.Section[i-1].SectionItemCount:=1;
@@ -2023,7 +2076,7 @@ begin
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    Result.Section[i-1].SectionItem[0].ItemCount:=1;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_addrev.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.debug_abbrev*';
    inc(i);
   end;
  if(Script.VersionSwitch) then
@@ -2038,8 +2091,8 @@ begin
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    Result.Section[i-1].SectionItem[0].ItemCount:=2;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version.*';
-   Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.versym.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.versym*';
    inc(i);
    {Set the Section .gnu_version}
    Result.Section[i-1].SectionName:='.gnu_version_d';
@@ -2051,8 +2104,8 @@ begin
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    Result.Section[i-1].SectionItem[0].ItemCount:=2;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_d.*';
-   Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.verdef.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_d*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.verdef*';
    inc(i);
    {Set the Section .gnu_version}
    Result.Section[i-1].SectionName:='.gnu_version_r';
@@ -2064,8 +2117,8 @@ begin
    Result.Section[i-1].SectionItem[0].ItemKeep:=true;
    Result.Section[i-1].SectionItem[0].ItemCount:=2;
    SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_r.*';
-   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.verneed.*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.gnu_version_r*';
+   Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.verneed*';
    inc(i);
   end;
 end;
@@ -2088,7 +2141,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.text.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.text*';
  inc(i);
  {Set the Section .rodata,can be read and execute}
  Result.Section[i-1].SectionName:='.rodata';
@@ -2100,7 +2153,7 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=1;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,1);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.rodata.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.rodata*';
  inc(i);
  {Set the Section .data,can be read and write}
  Result.Section[i-1].SectionName:='.data';
@@ -2113,8 +2166,8 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=2;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.data.*';
- Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.bss.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.data*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.bss*';
  inc(i);
  {Set the Section .data,can be read and write}
  Result.Section[i-1].SectionName:='.sdata';
@@ -2127,8 +2180,8 @@ begin
  Result.Section[i-1].SectionItem[0].ItemClass:=unild_item_filter;
  Result.Section[i-1].SectionItem[0].ItemCount:=2;
  SetLength(Result.Section[i-1].SectionItem[0].ItemFilter,2);
- Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sdata.*';
- Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.sbss.*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[0]:='.sdata*';
+ Result.Section[i-1].SectionItem[0].ItemFilter[1]:='.sbss*';
  inc(i);
 end;
 

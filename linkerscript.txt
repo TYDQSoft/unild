@@ -1,12 +1,9 @@
 Entry(_start)
+BaseAddress($00400000)
 FileAlign($1000)
 Section(.text,read,execute)
 begin
  *(.text*)
-end;
-Section(.vectab,read,execute)
-begin
- *(.vectab*)
 end;
 Section(.rodata,read)
 begin
@@ -15,5 +12,36 @@ end;
 Section(.data,read,write)
 begin
  *(.data*)
+end;
+Section(.bss,read,write)
+begin
  *(.bss*)
+end;
+Section(.fpcdata,noattribute)
+begin
+ KEEP(.fpc,.fpc.n_version,.fpc.n_links)
+end;
+Section(.debug_frame)
+begin 
+ KEEP(.debug_frame*)
+end;
+Section(.debug_info)
+begin 
+ KEEP(.debug_info*)
+end;
+Section(.debug_line)
+begin 
+ KEEP(.debug_line*)
+end;
+Section(.debug_aranges)
+begin 
+ KEEP(.debug_aranges*)
+end;
+Section(.debug_ranges)
+begin 
+ KEEP(.debug_ranges*)
+end;
+Section(.debug_abbrev)
+begin 
+ KEEP(.debug_abbrev*)
 end;
