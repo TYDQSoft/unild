@@ -870,10 +870,7 @@ begin
        if(length(tempstr)<=2) then break
        else if(length(tempstr)>2) then
         begin
-         if(Copy(tempstr,1,2)='--') then
-          begin
-           inc(j); break;
-          end;
+         if(Copy(tempstr,1,2)='--') then break;
          if((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
          ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39)) then
          tempstr:=Copy(tempstr,2,length(tempstr)-2);
