@@ -426,7 +426,7 @@ begin
 end;
 function unifile_hash_table_bucket_count(SearchCount:SizeUint):SizeUInt;
 begin
- Result:=SearchCount*5 div 3+1;
+ Result:=SearchCount*2+1;
 end;
 function unifile_lsb_to_msb(lsbdata:word):word;
 begin
@@ -7351,7 +7351,7 @@ begin
        d1:=0;
        if(FileResult.AdjustValue>=0) then d1:=1 shl 23;
        d1:=d1 or ChangeValue;
-       d2:=1 shl 23+$FFF; d2:=Pdword(changePointer)^ and (not d2);
+       d2:=1 shl 23+$FFF; d2:=Pdword(changePointer)^;
        d3:=d1+d2;
        Pdword(changePointer)^:=d3;
       end
@@ -7363,70 +7363,70 @@ begin
        d1:=0;
        if(FileResult.AdjustValue>=0) then d1:=1 shl 23;
        d1:=d1 or ChangeValue;
-       d2:=1 shl 23+$FFF; d2:=Pdword(ChangePointer)^ and (not d2);
+       d2:=1 shl 23+$FFF; d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_absolute_5bit) then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not $000007C0);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_pc_8bit) then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not $000000FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_pc_relative_6bit_b) then
       begin
        d1:=(ChangeValue shr 6) and 1 shl 9+(ChangeValue shr 1) and $1F;
-       d2:=Pdword(ChangePointer)^ and (not $000002FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_pc_11bit) then
       begin
        d1:=ChangeValue shr 1;
-       d2:=Pdword(ChangePointer)^ and (not $000003FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_pc_9bit) then
       begin
        d1:=ChangeValue shr 1;
-       d2:=Pdword(ChangePointer)^ and (not $000000FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_alu_abs_g0_no_check) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not $000000FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_alu_abs_g1_no_check) then
       begin
        d1:=ChangeValue shr 8;
-       d2:=Pdword(ChangePointer)^ and (not $000000FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_alu_abs_g2_no_check) then
       begin
        d1:=ChangeValue shr 16;
-       d2:=Pdword(ChangePointer)^ and (not $000000FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_alu_abs_g3) then
       begin
        d1:=ChangeValue shr 24;
-       d2:=Pdword(ChangePointer)^ and (not $000000FF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
@@ -7434,7 +7434,7 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_pc_relative_24bit) then
       begin
        d1:=ChangeValue shr 1;
-       d2:=Pdword(ChangePointer)^ and (not $00FFFFFF);
+       d2:=Pdword(ChangePointer)^;
        d3:=d1+d2;
        Pdword(ChangePointer)^:=d3;
       end
@@ -7444,7 +7444,7 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_movw_base_relative) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not ($1F and ($3FF shl 21)));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 5;
        Pdword(ChangePointer)^:=d2;
       end
@@ -7455,7 +7455,7 @@ begin
        d1:=ChangeValue shr 16;
        d2:=d1 and $FFF;
        d3:=d1 shr 12;
-       d4:=Pdword(ChangePointer)^ and (not ($F shl 12+$FFF shl 20));
+       d4:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d4;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_pc_relative_20bit_b) then
@@ -7463,7 +7463,7 @@ begin
        d1:=ChangeValue and $7FF;
        d2:=ChangeValue shr 11 and $3F;
        d2:=d2 shl 16+d1;
-       d3:=Pdword(ChangePointer)^ and (not ($000007FF+$0000003F shl 16));
+       d3:=Pdword(ChangePointer)^;
        d3:=d3+d2;
        Pdword(ChangePointer)^:=d3;
       end
@@ -7473,7 +7473,7 @@ begin
        d2:=ChangeValue shr 8 and $7;
        d3:=ChangeValue and $FF;
        d4:=d1 shl 26+d2 shl 12+d3;
-       d5:=Pdword(ChangePointer)^ and (not (1 shl 26+$7 shl 12+$FF));
+       d5:=Pdword(ChangePointer)^;
        d5:=d5+d4;
        Pdword(ChangePointer)^:=d5;
       end
@@ -7482,13 +7482,13 @@ begin
        d1:=0;
        if(FileResult.AdjustValue>=0) then d1:=1 shl 23;
        d1:=d1 or ChangeValue;
-       d2:=1 shl 23+$FFF; d2:=Pdword(ChangePointer)^ and (not d2);
+       d2:=1 shl 23+$FFF; d2:=Pdword(ChangePointer)^;
        d1:=d1+d2;
        Pdword(ChangePointer)^:=d1;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_arm_thumb_got_entry_relative_to_got_origin) then
       begin
-       d1:=Pdword(ChangePointer)^ and (not (1 shl 23+$FFF));
+       d1:=Pdword(ChangePointer)^;
        d1:=d1+ChangeValue;
        Pdword(ChangePointer)^:=d1;
       end
@@ -7498,7 +7498,7 @@ begin
        d2:=ChangeValue shr 1 and 1;
        d3:=ChangeValue shr 12;
        d4:=d1 shl 1+d2 shl 11+d3 shl 16;
-       d2:=Pdword(ChangePointer)^ and (not ($000003FF shl 1+$00000001 shl 11+$0000001F shl 16));
+       d2:=Pdword(ChangePointer)^;
        d4:=d4+d2;
        Pdword(ChangePointer)^:=d4;
       end
@@ -7508,7 +7508,7 @@ begin
        d2:=ChangeValue shr 1 and 1;
        d3:=ChangeValue shr 12;
        d4:=d1 shl 1+d2 shl 11+d3 shl 16;
-       d2:=Pdword(ChangePointer)^ and (not ($000003FF shl 1+$00000001 shl 11+$00000001 shl 16));
+       d2:=Pdword(ChangePointer)^;
        d4:=d4+d2;
        Pdword(ChangePointer)^:=d4;
       end
@@ -7518,7 +7518,7 @@ begin
        d2:=ChangeValue shr 1 and 1;
        d3:=ChangeValue shr 12;
        d4:=d1 shl 1+d2 shl 11+d3 shl 16;
-       d2:=Pdword(ChangePointer)^ and (not ($000003FF shl 1+$00000001 shl 11+$0000007F shl 16));
+       d2:=Pdword(ChangePointer)^;
        d4:=d4+d2;
        Pdword(ChangePointer)^:=d4;
       end
@@ -7854,7 +7854,7 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_rel_offset_movk_imm_bit15_0) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 5;
        Pdword(ChangePointer)^:=d2;
       end
@@ -7864,7 +7864,7 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_rel_offset_movk_imm_bit31_16)then
       begin
        d1:=ChangeValue shr 16;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 5;
        Pdword(ChangePointer)^:=d2;
       end
@@ -7874,7 +7874,7 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_rel_offset_movk_imm_bit47_32)then
       begin
        d1:=ChangeValue shr 32;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 5;
        Pdword(ChangePointer)^:=d2;
       end
@@ -7883,7 +7883,7 @@ begin
      or (basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_rel_offset_movn_z_imm_bit15_0)then
       begin
        if(FileResult.AdjustValue>=0) then d1:=1 shl 30 else d1:=0;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 5+1 shl 30));
+       d2:=Pdword(ChangePointer)^;
        if(FileResult.AdjustValue>=0) then d1:=d1+ChangeValue and $FFFF
        else d1:=d1+not Word(ChangeValue and $FFFF);
        d2:=d2+d1 shl 5;
@@ -7894,7 +7894,7 @@ begin
      or (basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_rel_offset_movn_z_imm_bit31_16)then
       begin
        if(FileResult.AdjustValue>=0) then d1:=1 shl 30 else d1:=0;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 5+1 shl 30));
+       d2:=Pdword(ChangePointer)^;
        if(FileResult.AdjustValue>=0) then d1:=d1+(ChangeValue shr 16) and $FFFF else
        d1:=d1+not Word((ChangeValue shr 16) and $FFFF);
        d2:=d2+d1 shl 5;
@@ -7905,7 +7905,7 @@ begin
      or (basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_rel_offset_movn_z_imm_bit47_32)then
       begin
        if(FileResult.AdjustValue>=0) then d1:=1 shl 30 else d1:=0;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 5+1 shl 30));
+       d2:=Pdword(ChangePointer)^;
        if(FileResult.AdjustValue>=0) then d1:=d1+(ChangeValue shr 32) and $FFFF
        else d1:=d1+not Word((ChangeValue shr 32) and $FFFF);
        d2:=d2+d1 shl 5;
@@ -7915,7 +7915,7 @@ begin
      or (basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_rel_offset_movn_z_imm_bit63_48) then
       begin
        if(FileResult.AdjustValue>=0) then d1:=1 shl 30 else d1:=0;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 5+1 shl 30));
+       d2:=Pdword(ChangePointer)^;
        if(FileResult.AdjustValue>=0) then d1:=d1+(ChangeValue shr 48) and $FFFF else
        d1:=d1+not Word((ChangeValue shr 48) and $FFFF);
        d2:=d2+d1 shl 5;
@@ -7925,14 +7925,14 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_pc_rel_got_offset_bit20_2) then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not ($0007FFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_adr_pc_rel_low21bit) then
       begin
        d1:=ChangeValue and $001FFFFF;
        d2:=d1 and 3; d3:=(d1 shr 2) and $7FFFF;
-       d4:=Pdword(ChangePointer)^ and (not ($0007FFFF shl 5+$00000003 shl 29));
+       d4:=Pdword(ChangePointer)^;
        d4:=d4+d2 shl 29+d3 shl 5;
        Pdword(ChangePointer)^:=d4;
       end
@@ -7941,8 +7941,8 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_page_rel_adrp_bit32_12) then
       begin
        d1:=ChangeValue shr 12;
-       d2:=d1 and 3; d3:=(d1 shr 2) and $7FFFF;
-       d4:=Pdword(ChangePointer)^ and (not ($0007FFFF shl 5+$00000003 shl 29));
+       d2:=d1 and 3; d3:=d1 shr 2;
+       d4:=Pdword(ChangePointer)^;
        d4:=d4+d2 shl 29+d3 shl 5;
        Pdword(ChangePointer)^:=d4;
       end
@@ -7950,49 +7950,49 @@ begin
      (basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_ld_or_st_absolute_low12bit) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not ($00000FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 10;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_add_bit16_imm_bit11_1) then
       begin
        d1:=ChangeValue shr 1;
-       d2:=Pdword(ChangePointer)^ and (not ($00000FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 11;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_add_bit32_imm_bit11_2) then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not ($000003FF shl 10));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 12;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_add_bit64_imm_bit11_3) then
       begin
        d1:=ChangeValue shr 3;
-       d2:=Pdword(ChangePointer)^ and (not ($00000FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 13;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_add_bit128_imm_from_bit11_4) then
       begin
        d1:=ChangeValue shr 4;
-       d2:=Pdword(ChangePointer)^ and (not ($00000FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 10;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_pc_rel_tbz_bit15_2) then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not ($00003FFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 5;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_pc_rel_cond_or_br_bit20_2) then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not ($0007FFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 5;
        Pdword(ChangePointer)^:=d2;
       end
@@ -8000,7 +8000,7 @@ begin
      (basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_pc_rel_call_bit27_2)then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not $03FFFFFF);
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1;
        Pdword(ChangePointer)^:=d2;
       end
@@ -8008,14 +8008,14 @@ begin
      or(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_got_page_rel_got_offset_ld_st_bit14_3) then
       begin
        d1:=ChangeValue shr 3;
-       d2:=Pdword(ChangePointer)^ and (not ($00000FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 10;
        Pdword(ChangePointer)^:=d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_aarch64_dir_got_offset_ld_st_imm_bit11_3) then
       begin
        d1:=ChangeValue shr 3;
-       d2:=Pdword(ChangePointer)^ and (not ($000001FF shl 12));
+       d2:=Pdword(ChangePointer)^;
        d3:=d2 and ($3 shl 10);
        if(d3=0) then d2:=d2+d1 shl 10 else d2:=d2+d1 shl 12;
        Pdword(ChangePointer)^:=d2;
@@ -8324,7 +8324,7 @@ begin
        d1:=(d7 and $3); d2:=(d7 shr 2) and $3;
        d3:=(d7 shr 4) and $1; d4:=(d7 shr 5) and $3;
        d5:=(d7 shr 7) and $1;
-       d6:=Pword(ChangePointer)^ and (not ($1F shl 2+$7 shl 10));
+       d6:=Pword(ChangePointer)^;
        d6:=d6+d1 shl 3+d2 shl 10+d3 shl 2+d4 shl 5+d5 shl 12;
        Pword(ChangePointer)^:=d6;
       end
@@ -8336,7 +8336,7 @@ begin
        d5:=(d10 and $400) shr 10; d6:=(d10 and $300) shr 8;
        d7:=(d10 and $10) shr 4;
        d8:=(d10 and $800) shr 11;
-       d9:=Pword(ChangePointer)^ and (not ($7FF shl 2));
+       d9:=Pword(ChangePointer)^;
        d9:=d9+d1 shl 2+d2 shl 3+d3 shl 6+d4 shl 7+d5 shl 8+d6 shl 9+d7 shl 11+d8 shl 12;
        Pword(ChangePointer)^:=d9;
       end
@@ -8345,27 +8345,27 @@ begin
        d1:=ChangeValue shr 1;
        d2:=d1 and $F; d3:=(d1 shr 4) and $3F; d4:=(d1 shr 10) and $1;
        d5:=(d1 shr 11) and $1;
-       d6:=Pdword(ChangePointer)^ and (not ($1F shl 7+$7F shl 25));
+       d6:=Pdword(ChangePointer)^;
        d6:=d6+d2 shl 8+d3 shl 25+d4 shl 7+d5 shl 31;
        Pdword(ChangePointer)^:=d6;
       end
      else if(FileResult.RiscvType=elf_riscv_i_type) then
       begin
        d1:=ChangeValue and $FFF;
-       d2:=Pdword(ChangePointer)^ and $000FFFFF;
+       d2:=Pdword(ChangePointer)^;
        d2:=d2+d1 shl 20; Pdword(ChangePointer)^:=d2;
       end
      else if(FileResult.RiscvType=elf_riscv_s_type) then
       begin
        d5:=ChangeValue and $FFF;
        d1:=d5 and $1F; d2:=(d5 shr 5) and $7F;
-       d4:=Pdword(ChangePointer)^ and (not ($1F shl 7+$7F shl 25));
+       d4:=Pdword(ChangePointer)^;
        d4:=d4+d1 shl 7+d2 shl 25; Pdword(ChangePointer)^:=d4;
       end
      else if(FileResult.RiscvType=elf_riscv_u_type) then
       begin
        d2:=(ChangeValue+$800) shr 12;
-       d1:=Pdword(ChangePointer)^ and $00000FFF;
+       d1:=Pdword(ChangePointer)^;
        d1:=d1+d2 shl 12;
        Pdword(ChangePointer)^:=d1;
       end
@@ -8374,7 +8374,7 @@ begin
        d1:=ChangeValue shr 1;
        d2:=d1 and $3FF; d3:=(d1 shr 10) and 1; d4:=(d1 shr 11) and $FF;
        d5:=(d1 shr 19) and $1;
-       d6:=Pdword(ChangePointer)^ and $00000FFF;
+       d6:=Pdword(ChangePointer)^;
        d6:=d6+d2 shl 21+d3 shl 20+d4 shl 12+d5 shl 31;
        Pdword(ChangePointer)^:=d6;
       end
@@ -8382,19 +8382,19 @@ begin
       begin
        {Former is U Type}
        d2:=(ChangeValue+$800) shr 12;
-       d1:=Pdword(ChangePointer)^ and $00000FFF;
+       d1:=Pdword(ChangePointer)^;
        d1:=d1+d2 shl 12;
        Pdword(ChangePointer)^:=d1;
        {Latter is I type}
        d1:=ChangeValue and $FFF;
-       d2:=Pdword(ChangePointer+4)^ and $000FFFFF;
+       d2:=Pdword(ChangePointer+4)^;
        d2:=d2+d1 shl 20;
        Pdword(ChangePointer+4)^:=d2;
       end
      else if(FileResult.Bits=6) then
       begin
        d1:=Pbyte(ChangePointer)^ and $C0;
-       d2:=ChangeValue and $3F;
+       d2:=ChangeValue;
        Pbyte(ChangePointer)^:=d1+d2;
       end
      else if(FileResult.Bits=8) then
@@ -8670,126 +8670,126 @@ begin
      if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_b16) then
       begin
        d1:=ChangeValue shr 2;
-       d2:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 10;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_b21) then
       begin
        d1:=ChangeValue shr 2;
        d2:=(d1 shr 16) and $1F; d3:=d1 and $FFFF;
-       d4:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 10+$1F));
+       d4:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d4+d3 shl 10+d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_b26) then
       begin
        d1:=ChangeValue shr 2;
        d2:=(d1 shr 16) and $3FF; d3:=d1 and $FFFF;
-       d4:=Pdword(ChangePointer)^ and (not ($0000FFFF shl 10+$3FF));
+       d4:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d4+d3 shl 10+d2;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_absolute_high_20bit) then
       begin
        d1:=ChangeValue shr 12;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_absolute_low_12bit) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 10;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_absolute_64bit_low_20bit) then
       begin
        d1:=ChangeValue shr 32;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_absolute_64bit_high_12bit) then
       begin
        d1:=ChangeValue shr 52;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 10;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_pcala_high_20bit) then
       begin
        d1:=ChangeValue shr 12;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_pcala_low_12bit) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 10;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_pcala64_low_20bit) then
       begin
        d1:=ChangeValue shr 32;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_pcala64_high_12bit) then
       begin
        d1:=ChangeValue shr 52;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 10;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got_pc_high_20bit) then
       begin
        d1:=ChangeValue shr 12;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got_pc_low_12bit) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 10;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got64_pc_low_20bit) then
       begin
        d1:=ChangeValue shr 32;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got64_pc_high_12bit) then
       begin
        d1:=ChangeValue shr 52;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got_high_20bit) then
       begin
        d1:=ChangeValue shr 12;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got_low_12bit) then
       begin
        d1:=ChangeValue;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 10;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got64_low_20bit) then
       begin
        d1:=ChangeValue shr 32;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_got64_high_12bit) then
       begin
        d1:=ChangeValue shr 52;
-       d2:=Pdword(ChangePointer)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
      else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_32_pc_relative) then
       begin
        d1:=ChangeValue shr 12;
-       d2:=Pdword(ChangePointer)^ and (not ($FFFFF shl 5));
+       d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
        d1:=ChangeValue and $FFF;
-       d2:=Pdword(ChangePointer+4)^ and (not ($FFF shl 10));
+       d2:=Pdword(ChangePointer+4)^;
        Pdword(ChangePointer+4)^:=d2+d1 shl 10;
       end
      else if(FileResult.Bits=8) then
