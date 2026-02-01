@@ -113,7 +113,7 @@ begin
 end;
 procedure unild_help;
 begin
- writeln('unild(universal linker editor) version 0.0.3');
+ writeln('unild(universal linker editor) version 0.0.4');
  writeln('Commands:unild [parameters] '+
  '(Linking commands and command values are not case-sensitive,while the value,file name and path not)');
  writeln('Tips 1:Implicit section will not be auto-generated in the file,'
@@ -269,8 +269,18 @@ begin
  writeln('  Set the ELF Format Shared Library Internal Name for Dynamic Linking(ELF Only)');
  writeln('--enable-ver,--enablever,--enable-version,--enableversion');
  writeln('  Enable the Version of the ELF Format Files.');
+ writeln('--generate-version,--genversion');
+ writeln('  Generate a version specified for the File(ELF File Format Only).');
+ writeln('--generate-linker-sign,--gen-linker-sign');
+ writeln('  Generate a sign of the linker(Automatically be unild version 0.0.4,ELF File Format Only)');
+ writeln('--generate-custom-sign,--gen-custom-sign');
+ writeln('  Generate a custom sign for the output file(ELF File Format Only)');
  writeln('--implicit-section-address,--implicitsection-address,--implicitsectionaddress');
  writeln('  Enable the Implicit Section Changes with Section Name and its Address(Such as '+
+ '.hash,.gnu.hash,.dynsym,.dynstr,.dynamic,.got,.got.plt,any sort of .rela,.rel,.relr,'+
+ 'except .symtab,.strtab,.shstrtab cannot to be changed).');
+ writeln('--implicit-section-maxsize,--implicitsection-maxsize,--implicitsectionmaxsize');
+ writeln('  Enable the Implicit Section Changes with Section Name and its Maximum Size(Such as '+
  '.hash,.gnu.hash,.dynsym,.dynstr,.dynamic,.got,.got.plt,any sort of .rela,.rel,.relr,'+
  'except .symtab,.strtab,.shstrtab cannot to be changed).');
  writeln('--help');
@@ -362,6 +372,42 @@ begin
    (LowerCase(ParamStr(i))='--no-exec-stack') or (LowerCase(ParamStr(i))='--no-execstack') then
     begin
      Script.NoExecutableStack:=true;
+    end
+   else if(LowerCase(ParamStr(i))='--generate-version') or (LowerCase(ParamStr(i))='--genversion') then
+    begin
+     if(i+1>ParamCount) or (Copy(ParamStr(i+1),1,2)='--') then
+      begin
+       writeln('ERROR:Version Content not defined.');
+       readln;
+       halt;
+      end;
+     Script.GenerateVersion:=true; Script.VersionContent:=ParamStr(i+1); inc(i);
+    end
+   else if(LowerCase(ParamStr(i))='--generate-custom-sign') or
+   (LowerCase(ParamStr(i))='--gen-custom-sign') then
+    begin
+     Script.GenerateCustomSign:=true;
+     if(i+1>ParamCount) or (Copy(ParamStr(i+1),1,2)='--') then
+      begin
+       writeln('ERROR:Custom Sign Section Name not defined.');
+       readln;
+       halt;
+      end;
+     Script.CustomSignSectionName:=ParamStr(i+1);
+     if(i+2>ParamCount) or (Copy(ParamStr(i+2),1,2)='--') then
+      begin
+       writeln('ERROR:Custom Sign Content not defined.');
+       readln;
+       halt;
+      end;
+     Script.CustomSignContent:=ParamStr(i+2);
+     inc(i,2);
+    end
+   else if(LowerCase(ParamStr(i))='--generate-linker-sign') or
+   (LowerCase(ParamStr(i))='--gen-linker-sign') then
+    begin
+     Script.GenerateLinkerSign:=true;
+     Script.LinkerSignContent:='unild version 0.0.4';
     end
    else if(LowerCase(ParamStr(i))='--readonlygot') or (LowerCase(ParamStr(i))='--readonly-got') then
     begin
@@ -942,7 +988,7 @@ begin
    (LowerCase(ParamStr(i))='--implicitsection-address') or
    (LowerCase(ParamStr(i))='--implicitsectionaddress') then
     begin
-     j:=i+1;
+     j:=i+1; tempstr:='';
      while(j<=ParamCount)do
       begin
        tempstr:=ParamStr(j);
@@ -964,7 +1010,7 @@ begin
          readln;
          halt;
         end;
-       if(Copy(ParamStr(j+1),1,2)='--') then
+       if(j+1>ParamCount) or (Copy(ParamStr(j+1),1,2)='--') then
         begin
          writeln('ERROR:The Specified Implicit Section does not have the address value of '+
          'this implicit section.');
@@ -979,6 +1025,62 @@ begin
        Script.ImplicitAddress[i-1]:=tempvalue;
        inc(j,2);
       end;
+     if(tempstr='') then
+      begin
+       writeln('ERROR:Implicit Section Address must have at least two parameters.');
+       readln;
+       halt;
+      end;
+     i:=j; continue;
+    end
+   else if(LowerCase(ParamStr(i))='--implicit-section-maxsize') or
+   (LowerCase(ParamStr(i))='--implicitsection-maxsize') or
+   (LowerCase(ParamStr(i))='--implicitsectionmaxsize') then
+    begin
+     j:=i+1; tempstr:='';
+     while(j<=ParamCount)do
+      begin
+       tempstr:=ParamStr(j);
+       if(Copy(tempstr,1,2)='--') then break;
+       if(tempstr='.strtab') or (tempstr='.symtab') or (tempstr='.shstrtab') then
+        begin
+         writeln('ERROR:Typed section '+tempstr+' is specified section auto-generated and '+
+         'not to be changed,cannot change address with the Implicit Section Max Size Command.');
+         readln;
+         halt;
+        end
+       else if(tempstr<>'.hash')and(tempstr<>'.gnu.hash')and(tempstr<>'.dynamic')
+       and(tempstr<>'.dynsym')and(tempstr<>'.dynstr')and(tempstr<>'.got')and(tempstr<>'.got.plt')
+       and(Copy(tempstr,1,5)<>'.rela')and(Copy(tempstr,1,5)<>'.relr')
+       and(Copy(tempstr,1,4)<>'.rel')then
+        begin
+         writeln('ERROR:Typed section '+tempstr+' is not the implicit section,cannot change max size '+
+         'with the Implicit Section Max Size Command.');
+         readln;
+         halt;
+        end;
+       if(j+1>ParamCount) and (Copy(ParamStr(j+1),1,2)='--') then
+        begin
+         writeln('ERROR:The Specified Implicit Section does not have the Max size value of '+
+         'this implicit section.');
+         readln;
+         halt;
+        end;
+       tempvalue:=unild_str_to_int(ParamStr(j+1));
+       inc(Script.ImplicitSizeCount);
+       SetLength(Script.ImplicitSizeName,Script.ImplicitSizeCount);
+       SetLength(Script.ImplicitSize,Script.ImplicitSizeCount);
+       Script.ImplicitSizeName[i-1]:=tempstr;
+       Script.ImplicitSize[i-1]:=tempvalue;
+       inc(j,2);
+      end;
+     if(tempstr='') then
+      begin
+       writeln('ERROR:Implicit Section Size must have at least two parameters.');
+       readln;
+       halt;
+      end;
+     i:=j; continue;
     end
    else if(LowerCase(ParamStr(i))='--help') then
     begin
@@ -1003,6 +1105,30 @@ begin
    unild_help;
    readln;
    exit;
+  end;
+ if(Script.GenerateCustomSign) then
+  begin
+   for i:=1 to Script.SectionCount do
+    begin
+     if(Script.Section[i-1].SectionName=Script.CustomSignSectionName) then
+      begin
+       writeln('ERROR:Section Name cannot be '+Script.CustomSignSectionName+' due to Section Name '+
+       Script.Section[i-1].SectionName+' is a existing section in linking.');
+       readln;
+       halt;
+      end;
+    end;
+   tempstr:=Script.CustomSignSectionName;
+   if(tempstr='.hash')and(tempstr='.gnu.hash')and(tempstr='.dynamic')
+   and(tempstr='.dynsym')and(tempstr='.dynstr')and(tempstr='.got')and(tempstr='.got.plt')
+   and(Copy(tempstr,1,5)='.rela')and(Copy(tempstr,1,5)='.relr')
+   and(Copy(tempstr,1,4)='.rel') then
+    begin
+     writeln('ERROR:Section Name cannot be '+Script.CustomSignSectionName+' due to Section Name '+
+     Script.Section[i-1].SectionName+' is a implicit section in linking.');
+     readln;
+     halt;
+    end;
   end;
  if(InputArchitecture<>0) then Script.InputArchitecture:=InputArchitecture;
  if(InputBits<>0) then Script.InputBits:=InputBits;

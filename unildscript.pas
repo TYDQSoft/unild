@@ -21,9 +21,14 @@ type unild_item=packed record
                    SectionAttribute:array of string;
                    SectionAttributeCount:byte;
                    SectionAddress:SizeUint;
+                   SectionAbsoluteAddress:boolean;
                    SectionAlign:dword;
                    SectionItem:array of unild_item;
                    SectionItemCount:SizeUint;
+                   SectionMaxSize:SizeUint;
+                   SectionMustHaveContent:boolean;
+                   SectionKeepWhenEmpty:boolean;
+                   SectionMaintainOriginalAlign:boolean;
                    end;
      unild_script=packed record
                   SystemIndex:byte;
@@ -77,10 +82,20 @@ type unild_item=packed record
                   DebugSwitch:boolean;
                   VersionSwitch:boolean;
                   EntryAsStartOfSection:boolean;
+                  GenerateVersion:boolean;
+                  VersionContent:string;
+                  GenerateLinkerSign:boolean;
+                  LinkerSignContent:string;
+                  GenerateCustomSign:boolean;
+                  CustomSignSectionName:string;
+                  CustomSignContent:string;
                   {For Implicit Address of Output File}
                   ImplicitName:array of string;
                   ImplicitAddress:array of SizeUint;
                   ImplicitCount:SizeUint;
+                  ImplicitSizeName:array of string;
+                  ImplicitSize:array of SizeUint;
+                  ImplicitSizeCount:SizeUint;
                   {Temporary Variables}
                   DynamicPathWithSubDirectoryList:array of string;
                   DynamicPathWithSubDirectoryCount:SizeUint;
@@ -121,7 +136,7 @@ var ScriptEnable:boolean=false;
     Script:unild_script;
 
 procedure unild_initialize;
-function unild_script_match_mask(checkstr:string;mask:string):boolean;
+function unild_script_match_mask(checkstr:string;mask:string;StartIndex:SizeUint=1):boolean;
 function unild_translate_string(str:string):string;
 function unild_str_to_int(str:string):SizeUint;
 function unild_script_read(filename:string):unild_script;
@@ -154,6 +169,10 @@ begin
  Script.DebugSwitch:=false; Script.VersionSwitch:=false;
  Script.EntryAsStartOfSection:=false; Script.OutputFileName:=''; Script.ImplicitCount:=0;
  Script.DynamicLibraryActualPathCount:=0;
+ Script.GenerateVersion:=false; Script.GenerateLinkerSign:=false;
+ Script.VersionContent:=''; Script.LinkerSignContent:='unild version 0.0.4';
+ Script.GenerateCustomSign:=false; Script.CustomSignContent:=''; Script.CustomSignSectionName:='';
+ Script.ImplicitSizeCount:=0; Script.ImplicitCount:=0;
 end;
 function unild_script_str_to_int(str:string):SizeUint;
 const hex1:string='0123456789ABCDEF';
@@ -460,10 +479,11 @@ begin
    inc(i);
   end;
 end;
-function unild_script_match_mask(checkstr:string;mask:string):boolean;
+function unild_script_match_mask(checkstr:string;mask:string;StartIndex:SizeUInt=1):boolean;
 var i,j,len1,len2:SizeUint;
 begin
- i:=1; j:=1; len1:=length(checkstr); len2:=length(mask);
+ i:=StartIndex; j:=StartIndex;
+ len1:=length(checkstr); len2:=length(mask);
  while(i<=len1)do
   begin
    if(mask[j]='*') then
@@ -507,7 +527,7 @@ begin
  Content:=StrList.Text;
  {Transform the string to Line}
  LineList.LineCount:=0; SetLength(LineList.Line,0);
- i:=1; j:=1; len:=length(Content);
+ i:=1; j:=1; len:=length(Content); row:=1;
  while(i<=len)do
   begin
    if(Copy(Content,i,3)='###') then
@@ -788,6 +808,12 @@ begin
       begin
        Result.EntryAsStartOfSection:=true;
       end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='generatelinkersign')
+     or(LowerCase(LineList.Line[i-1].Item[0])='genlinkersign') then
+      begin
+       Result.GenerateLinkerSign:=true;
+       Result.LinkerSignContent:='unild version 0.0.4';
+      end
      else if(LowerCase(LineList.Line[i-1].Item[0])='linkall') or
      (LowerCase(LineList.Line[i-1].Item[0])='nosmartlink') or
      (LowerCase(LineList.Line[i-1].Item[0])='nosmartlinking') or
@@ -922,6 +948,40 @@ begin
          halt;
         end;
       end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='genversion')
+     or(LowerCase(LineList.Line[i-1].Item[0])='generateversion') then
+      begin
+       if(LineList.Line[i-1].Count=4) then
+        begin
+         Result.GenerateVersion:=true;
+         Result.VersionContent:=LineList.Line[i-1].Item[2];
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:Version Generate must be genversion/generateversion(versionvalue).');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='gencustomsign')
+     or(LowerCase(LineList.Line[i-1].Item[0])='generatecustomsign') then
+      begin
+       if(LineList.Line[i-1].Count=6) then
+        begin
+         Result.GenerateCustomSign:=true;
+         Result.CustomSignSectionName:=LineList.Line[i-1].Item[2];
+         Result.CustomSignContent:=LineList.Line[i-1].Item[4];
+        end
+       else
+        begin
+         writeln('ERROR in Column '+IntToStr(i)+', Row 1');
+         writeln('ERROR:Custom Sign Generate must be gencustomsign'+
+         '/generatecustomsign(customsignsectionname,customsigncontent).');
+         readln;
+         halt;
+        end;
+      end
      else if(LowerCase(LineList.Line[i-1].Item[0])='untypedbinaryalign')
      or(LowerCase(LineList.Line[i-1].Item[0])='untypedbinary_align')
      or(LowerCase(LineList.Line[i-1].Item[0])='untyped_binary_align')then
@@ -1003,8 +1063,8 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) and (((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
-           ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39))) then
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
            tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            Result.Interpreter:=tempstr1;
            if(FileExists(Result.Interpreter)) then break
@@ -1040,8 +1100,8 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) and (((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
-           ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39))) then
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
            tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            Result.InterpreterDynamicLinkFunction:=tempstr1;
            j:=k+1;
@@ -1076,8 +1136,8 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) and (((tempstr[1]='"') and (tempstr[length(tempstr)]='"')) or
-           ((tempstr[1]=#39) and (tempstr[length(tempstr)]=#39))) then
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
+           ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
            tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            tempstr3:=ExtractFileName(tempstr1);
            inc(Result.DynamicLibraryCount);
@@ -1131,7 +1191,7 @@ begin
              inc(k);
             end;
            tempstr1:=tempstr2;
-           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr[length(tempstr1)]='"')) or
+           if(length(tempstr1)>=2) and (((tempstr1[1]='"') and (tempstr1[length(tempstr1)]='"')) or
            ((tempstr1[1]=#39) and (tempstr1[length(tempstr1)]=#39))) then
            tempstr1:=Copy(tempstr1,2,length(tempstr1)-2);
            inc(Result.DynamicLibraryCount);
@@ -1535,7 +1595,7 @@ begin
              else if(tempstr1<>'.hash')and(tempstr1<>'.gnu.hash')and(tempstr1<>'.dynamic')
              and(tempstr1<>'.dynsym')and(tempstr1<>'.dynstr')and(tempstr1<>'.got')
              and(tempstr1<>'.got.plt')and(Copy(tempstr1,1,5)<>'.rela')and(Copy(tempstr1,1,5)<>'.relr')
-             and(Copy(tempstr1,1,4)<>'.rel')then
+             and(Copy(tempstr1,1,4)<>'.rel')and(tempstr1<>'.version')and(tempstr1<>'.unidata')then
               begin
                writeln('ERROR in Column ',i,',Row ',LineList.Line[i-1].Offset[j-1],':');
                writeln('ERROR:Typed section '+tempstr1+' is not the implicit section,'+
@@ -1569,8 +1629,80 @@ begin
         begin
          writeln('ERROR in Column ',i,',Row '+IntToStr(LineList.Line[i-1].Offset[0])+':');
          writeln('ERROR:Implicit Section Address(implicit_section_address/'
-         +'implicitsection_address/implicitsectionaddress(SectionName,SectionAddress,'+
+         +'implicitsection_address/implicitsectionaddress(SectionName,Section Address,'+
          '...(with Section Name and Section Address Pair)) have no enough parameters.');
+         readln;
+         halt;
+        end;
+      end
+     else if(LowerCase(LineList.Line[i-1].Item[0])='implicit_section_maxsize')
+     or(LowerCase(LineList.Line[i-1].Item[0])='implicitsection_maxsize')
+     or(LowerCase(LineList.Line[i-1].Item[0])='implicitsectionmaxsize') then
+      begin
+       j:=3;
+       if(LineList.Line[i-1].Count>=6) then
+        begin
+         k:=j+1; tempstr1:=''; tempstr1:=''; m:=3;
+         while(j<=LineList.Line[i-1].Count)do
+          begin
+           tempstr1:=''; k:=j+1; m:=j;
+           while(k<=LineList.Line[i-1].Count)do
+            begin
+             if(LineList.Line[i-1].Item[k-1]=',') or (LineList.Line[i-1].Item[k-1]=')') then break;
+             tempstr1:=tempstr1+LineList.Line[i-1].Item[k-1];
+             inc(k);
+            end;
+           if(tempstr1='') then
+            begin
+             tempstr1:=tempstr1;
+             if(tempstr1='.strtab') or (tempstr1='.symtab') or (tempstr1='.shstrtab') then
+              begin
+               writeln('ERROR in Column ',i,',Row ',LineList.Line[i-1].Offset[j-1],':');
+               writeln('ERROR:Typed section '+tempstr1+' is specified section auto-generated and'+
+               'and it cannot to be changed,'+
+               'cannot change maximum size with the Implicit Section maximum size Command.');
+               readln;
+               halt;
+              end
+             else if(tempstr1<>'.hash')and(tempstr1<>'.gnu.hash')and(tempstr1<>'.dynamic')
+             and(tempstr1<>'.dynsym')and(tempstr1<>'.dynstr')and(tempstr1<>'.got')
+             and(tempstr1<>'.got.plt')and(Copy(tempstr1,1,5)<>'.rela')and(Copy(tempstr1,1,5)<>'.relr')
+             and(Copy(tempstr1,1,4)<>'.rel')and(tempstr1<>'.version')and(tempstr1<>'.unidata')then
+              begin
+               writeln('ERROR in Column ',i,',Row ',LineList.Line[i-1].Offset[j-1],':');
+               writeln('ERROR:Typed section '+tempstr1+' is not the implicit section,'+
+               'cannot change its maximum size with the Implicit Section maximum size Command.');
+               readln;
+               halt;
+              end;
+            end
+           else
+            begin
+             tempvalue:=unild_str_to_int(tempstr1);
+             inc(Script.ImplicitSizeCount);
+             SetLength(Script.ImplicitSizeName,Script.ImplicitSizeCount);
+             SetLength(Script.ImplicitSize,Script.ImplicitSizeCount);
+             Script.ImplicitSizeName[i-1]:=tempstr1;
+             Script.ImplicitSize[i-1]:=tempvalue;
+             tempstr1:='';
+            end;
+           j:=k+1;
+          end;
+         if(tempstr1='') then
+          begin
+           writeln('ERROR in Column ',i,',Row ',LineList.Line[i-1].Offset[m-1],':');
+           writeln('ERROR:Typed section '+tempstr1+' size have not specified,must be specified '+
+           'when the implicit section name specified.');
+           readln;
+           halt;
+          end;
+        end
+       else
+        begin
+         writeln('ERROR in Column ',i,',Row '+IntToStr(LineList.Line[i-1].Offset[0])+':');
+         writeln('ERROR:Implicit Section Maximum size(implicit_section_maxsize/'
+         +'implicitsection_maxsize/implicitsectionmaxsize(SectionName,Section Maximum size,'+
+         '...(with Section Name and Section Maximum size Pair)) have no enough parameters.');
          readln;
          halt;
         end;
@@ -1610,6 +1742,13 @@ begin
             begin
              tempstr1:=LineList.Line[i-1].Item[j+1];
              Result.Section[Result.SectionCount-1].SectionAlign:=unild_script_str_to_int(tempstr1);
+            end
+           else if((LowerCase(LineList.Line[i-1].Item[j-1])='maxsize') or
+           (LowerCase(LineList.Line[i-1].Item[j-1])='sectionmaxsize')) and
+           (LineList.Line[i-1].Item[j]='=') then
+            begin
+             tempstr1:=LineList.Line[i-1].Item[j+1];
+             Result.Section[Result.SectionCount-1].SectionMaxSize:=unild_script_str_to_int(tempstr1);
             end;
           end
          else
@@ -1622,7 +1761,8 @@ begin
            and((tempstr1='.hash')or(tempstr1='.gnu.hash') or
            (tempstr1='.symtab')or(tempstr1='.strtab')or(tempstr1='.shstrtab')or(tempstr1='.dynamic')
            or(tempstr1='.dynsym')or(tempstr1='.dynstr')or(tempstr1='.got')or(tempstr1='.got.plt')
-           or(Copy(tempstr1,1,5)='.rela')or(Copy(tempstr1,1,4)='.rel') or (Copy(tempstr1,1,5)='.relr')) then
+           or(Copy(tempstr1,1,5)='.rela')or(Copy(tempstr1,1,4)='.rel') or (Copy(tempstr1,1,5)='.relr')
+           or(tempstr1='.version') or (tempstr1='.unidata')) then
             begin
              writeln('ERROR in Column '+IntToStr(i)+',Row '+IntToStr(LineList.Line[i-1].Offset[j-1])+':');
              writeln('Section Name '+tempstr1+' is a special section,cannot be specified in Linker Script.');
@@ -1639,6 +1779,27 @@ begin
             end
            else if(Result.Section[Result.SectionCount-1].SectionName='') then
            Result.Section[Result.SectionCount-1].SectionName:=tempstr1
+           else if(LowerCase(tempstr1)='keepwhenempty') or (LowerCase(tempstr1)='maintainwhenempty')
+           then
+            begin
+             Result.Section[Result.SectionCount-1].SectionKeepWhenEmpty:=true;
+            end
+           else if(LowerCase(tempstr1)='musthavecontent') or (LowerCase(tempstr1)='neededcontent')
+           or (LowerCase(tempstr1)='checkcontent') then
+            begin
+             Result.Section[Result.SectionCount-1].SectionMustHaveContent:=true;
+            end
+           else if(LowerCase(tempstr1)='absaddress') or (LowerCase(tempstr1)='absoluteaddress') then
+            begin
+             Result.Section[Result.SectionCount-1].SectionAbsoluteAddress:=true;
+             Result.NoFixedAddress:=false;
+            end
+           else if(LowerCase(tempstr1)='keeporgalign') or (LowerCase(tempstr1)='maintainorgalign')
+           or(LowerCase(tempstr1)='keeporiginalalign') or (LowerCase(tempstr1)='maintainoriginalalign')
+           then
+            begin
+             Result.Section[Result.SectionCount-1].SectionMaintainOriginalAlign:=true;
+            end
            else
             begin
              inc(Result.Section[Result.SectionCount-1].SectionAttributeCount);
@@ -1692,7 +1853,7 @@ begin
            if(LowerCase(tempstr1)='offset') or (LowerCase(tempstr1)='absoluteoffset')
            or(LowerCase(tempstr1)='absoffset') then
             begin
-             if(LineList.Line[j-1].Count>4) then
+             if(LineList.Line[j-1].Count<>4) then
               begin
                writeln('ERROR in Column '+IntToStr(j)+' ,Row 1');
                writeln('ERROR:Section Offset (Offset/absoluteOffset/absoffset(Value))'+
@@ -1708,7 +1869,7 @@ begin
             end
            else if(LowerCase(tempstr1)='reloffset') or (LowerCase(tempstr1)='relativeoffset') then
             begin
-             if(LineList.Line[j-1].Count>4) then
+             if(LineList.Line[j-1].Count<>4) then
               begin
                writeln('ERROR in Column '+IntToStr(j)+' ,Row 1');
                writeln('ERROR:Section RelativeOffset (RelOffset/RelativeOffset(Value))'
@@ -1723,9 +1884,25 @@ begin
              Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemRelativeOffset:=
              unild_script_str_to_int(LineList.Line[j-1].Item[2]);
             end
+           else if(LowerCase(tempstr1)='alignassection') or (LowerCase(tempstr1)='sectionalign') then
+            begin
+             if(LineList.Line[j-1].Count<>4) then
+              begin
+               writeln('ERROR in Column '+IntToStr(j)+' ,Row 1');
+               writeln('ERROR:Align As Section Align(alignassection/sectionalign(Value))'
+               +'should be only one parameter.');
+               readln;
+               halt;
+              end;
+             Result.Section[Result.SectionCount-1].SectionItem[
+             Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemClass:=unild_item_align;
+             Result.Section[Result.SectionCount-1].SectionItem[
+             Result.Section[Result.SectionCount-1].SectionItemCount-1].ItemRelativeOffset:=
+             Result.Section[Result.SectionCount-1].SectionAlign;
+            end
            else if(LowerCase(tempstr1)='align') or (LowerCase(tempstr1)='internalalign') then
             begin
-             if(LineList.Line[j-1].Count>4) then
+             if(LineList.Line[j-1].Count<>4) then
               begin
                writeln('ERROR in Column '+IntToStr(j)+' ,Row 1');
                writeln('ERROR:Section Internal Align (align/internalalign(Value))'

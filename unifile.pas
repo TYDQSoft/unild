@@ -119,6 +119,7 @@ type unifile_elf_object_file_symbol_table=packed record
                                     SectionNameHash:array of SizeUint;
                                     SectionContent:array of Pointer;
                                     SectionSize:array of SizeUint;
+                                    SectionAlign:array of SizeUint;
                                     {For Relocation Attributes}
                                     SectionRelocationCount:SizeUint;
                                     SectionRelocation:array of unifile_elf_object_file_parsed_relocation;
@@ -305,6 +306,7 @@ type unifile_elf_object_file_symbol_table=packed record
                         SectionSize:array of SizeUint;
                         SectionAlign:array of SizeUInt;
                         SectionOffset:array of SizeUint;
+                        SectionAddressAbsolute:array of boolean;
                         SectionAddress:array of SizeUint;
                         SectionCount:SizeUInt;
                         {For Entry Address}
@@ -559,8 +561,6 @@ var fs:TFileStream;
     DynamicStringTablePointer:Pointer;
     DynamicSymbolTableCount:SizeUint;
     DynamicSharedObjectNameIndex:SizeUint;
-    {For Temporary Variables of Acquiring}
-    TempNum1,TempNum2:SizeUint;
 begin
  {Read the Shared Object File}
  fs:=TFileStream.Create(DynamicLibraryPath,fmOpenRead);
@@ -711,9 +711,16 @@ begin
    i:=0; j:=2;
    while(j<=DynamicSymbolTableCount)do
     begin
-     if(elf32_reloc_type(Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     if(Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf32_symbol_table_entry))^.symbol_section_index=0) or
+     (Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf32_symbol_table_entry))^.symbol_section_index>elf_symbol_other_absolute) then
+      begin
+       inc(j); continue;
+      end;
+     if(elf_symbol_type_type(Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
      sizeof(elf32_symbol_table_entry))^.symbol_info)<>elf_symbol_type_function) and
-     (elf32_reloc_type(Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     (elf_symbol_type_type(Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
      sizeof(elf32_symbol_table_entry))^.symbol_info)<>elf_symbol_type_object) then
       begin
        inc(j); continue;
@@ -846,9 +853,16 @@ begin
    i:=0; j:=2;
    while(j<=DynamicSymbolTableCount)do
     begin
-     if(elf64_reloc_type(Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     if(Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf64_symbol_table_entry))^.symbol_section_index=0) or
+     (Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     sizeof(elf64_symbol_table_entry))^.symbol_section_index>elf_symbol_other_absolute) then
+      begin
+       inc(j); continue;
+      end;
+     if(elf_symbol_type_type(Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
      sizeof(elf64_symbol_table_entry))^.symbol_info)<>elf_symbol_type_function) and
-     (elf64_reloc_type(Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
+     (elf_symbol_type_type(Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
      sizeof(elf64_symbol_table_entry))^.symbol_info)<>elf_symbol_type_object) then
       begin
        inc(j); continue;
@@ -959,7 +973,7 @@ var fs:TFileStream;
     DynamicSymbolCount:Dword;
     DynamicStringPointer:Pointer;
     {For Temporary Variable during searching}
-    tempnum1,tempnum2,tempnum3:SizeUint;
+    tempnum1,tempnum2:SizeUint;
 begin
  Result.DynamicLibraryResolveOffset:=0;
  {Read the elf interpreter file in disk}
@@ -969,6 +983,7 @@ begin
  fs.Free;
  {Hash the Search Function}
  SearchFunctionHash:=unifile_elf_hash(basescript.InterpreterDynamicLinkFunction);
+ DynamicItemCount:=0;
  {Then Check the elf file}
  if(elf_check_signature(Pelf32_header(InterpreterContent)^.elf_id)=false) then
   begin
@@ -1136,6 +1151,14 @@ begin
    Result.DynamicLibraryResolveOffset:=
    Pelf32_symbol_table_entry(DynamicSymbolPointer+(
    FunctionIndex-1)*sizeof(elf32_symbol_table_entry))^.symbol_value;
+   if(Result.DynamicLibraryResolveOffset=0) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction+' exists but invaild '+
+     'in the interpreter.');
+     readln;
+     halt;
+    end;
   end
  else if(CheckBits=64) then
   begin
@@ -1280,6 +1303,14 @@ begin
    Result.DynamicLibraryResolveOffset:=
    Pelf64_symbol_table_entry(DynamicSymbolPointer+(
    FunctionIndex-1)*sizeof(elf64_symbol_table_entry))^.symbol_value;
+   if(Result.DynamicLibraryResolveOffset=0) then
+    begin
+     FreeMem(InterpreterContent);
+     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction+' exists but invaild '+
+     'in the interpreter.');
+     readln;
+     halt;
+    end;
   end;
  FreeMem(InterpreterContent);
 end;
@@ -2058,6 +2089,7 @@ begin
  SetLength(Result.SectionUsed,totalfile.ObjectSectionCount);
  SetLength(Result.SectionContent,totalfile.ObjectSectionCount);
  SetLength(Result.SectionSize,totalfile.ObjectSectionCount);
+ SetLength(Result.SectionAlign,totalfile.ObjectSectionCount);
  SetLength(Result.SectionRelocation,totalfile.ObjectRelocationCount);
  {Then parse the file}
  while(i<=totalfile.ObjectCount)do
@@ -2344,6 +2376,7 @@ begin
        Result.SectionFlag[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionFlag[j-1];
        Result.SectionType[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionType[j-1];
        Result.SectionSize[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionSize[j-1];
+       Result.SectionAlign[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionAlign[j-1];
        tempstr:='';
        if(totalfile.Objects[i-1].SectionType[j-1]<>elf_section_type_nobit) then
        Result.SectionContent[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionContent[j-1];
@@ -2640,10 +2673,11 @@ begin
       begin
        if(basescript.Section[i-1].SectionItem[j-1].ItemClass=unild_item_filter) then
         begin
+         k:=1;
          while(k<=basescript.Section[i-1].SectionItem[j-1].ItemCount)do
           begin
            if(unild_script_match_mask(Result.EntrySection,
-           basescript.Section[i-1].SectionItem[j-1].ItemFilter[k-1])) then break;
+           basescript.Section[i-1].SectionItem[j-1].ItemFilter[k-1],2)) then break;
            inc(k);
           end;
          if(k<=basescript.Section[i-1].SectionItem[j-1].ItemCount) then break;
@@ -2697,12 +2731,16 @@ begin
      inc(j);
     end;
    Result.SectionAddress[i-1]:=basescript.Section[i-1].SectionAddress;
-   if(basescript.Section[i-1].SectionAlign<>0) then
-   Result.SectionAlign[i-1]:=basescript.Section[i-1].SectionAlign
-   else
+   if(basescript.Section[i-1].SectionMaintainOriginalAlign=false) then
     begin
-     if(Result.Bits=32) then Result.SectionAlign[i-1]:=4 else Result.SectionAlign[i-1]:=8;
-    end;
+     if(basescript.Section[i-1].SectionAlign<>0) then
+     Result.SectionAlign[i-1]:=basescript.Section[i-1].SectionAlign
+     else
+      begin
+       if(Result.Bits=32) then Result.SectionAlign[i-1]:=4 else Result.SectionAlign[i-1]:=8;
+      end;
+    end
+   else Result.SectionAlign[i-1]:=0;
    Result.SectionName[i-1]:=basescript.Section[i-1].SectionName;
    Result.SectionVaild[i-1]:=true;
    Result.SectionContentInfo[i-1].ContentStartIndex:=ContentPointer+1;
@@ -2724,6 +2762,14 @@ begin
       begin
        InternalOffset:=unifile_align(InternalOffset,basescript.Section[i-1].SectionItem[k-1].ItemAlign);
        InternalOffsetAlternative:=InternalOffset;
+       if(basescript.Section[i-1].SectionMaintainOriginalAlign) then
+        begin
+         if(basescript.Section[i-1].SectionAlign=0) then
+         basescript.Section[i-1].SectionAlign:=basescript.Section[i-1].SectionItem[k-1].ItemAlign
+         else if(basescript.Section[i-1].SectionAlign<
+         basescript.Section[i-1].SectionItem[k-1].ItemAlign) then
+         basescript.Section[i-1].SectionAlign:=basescript.Section[i-1].SectionItem[k-1].ItemAlign;
+        end;
       end
      else
       begin
@@ -2749,11 +2795,19 @@ begin
          while(j<=m)do
           begin
            if(unild_script_match_mask(basefile.SectionName[n-1],
-           basescript.Section[i-1].SectionItem[k-1].ItemFilter[j-1])) then break;
+           basescript.Section[i-1].SectionItem[k-1].ItemFilter[j-1],2)) then break;
            inc(j);
           end;
          if(j<=m) then
           begin
+           if(basescript.Section[i-1].SectionMaintainOriginalAlign) then
+            begin
+             if(basescript.Section[i-1].SectionAlign=0) then
+             basescript.Section[i-1].SectionAlign:=basefile.SectionAlign[n-1]
+             else if(basefile.SectionAlign[n-1]<basescript.Section[i-1].SectionItem[k-1].ItemAlign) then
+             basescript.Section[i-1].SectionAlign:=basefile.SectionAlign[n-1];
+             InternalOffset:=unifile_align(InternalOffset,basefile.SectionAlign[n-1]);
+            end;
            if(NoAttribute=false) then
             begin
              if(basefile.SectionFlag[n-1] and elf_section_flag_write=elf_section_flag_write) then
@@ -2848,10 +2902,26 @@ begin
     end;
    if(NotInFileBool) then AttributeData:=AttributeData or unifile_attribute_not_in_file;
    Result.SectionAttribute[i-1]:=AttributeData;
-   if(Result.SectionContentInfo[i-1].ContentStartIndex>ContentPointer)or(InternalOffset=0)then
+   if(InternalOffset=0) and (basescript.Section[i-1].SectionMustHaveContent) then
+    begin
+     writeln('ERROR:The Section '+basescript.Section[i-1].SectionName+' content is '
+     +'empty which MUST have the Content.');
+     readln;
+     halt;
+    end
+   else if((Result.SectionContentInfo[i-1].ContentStartIndex>ContentPointer)or(InternalOffset=0))
+   and(basescript.Section[i-1].SectionKeepWhenEmpty=false) then
     begin
      Result.SectionContentInfo[i-1].ContentStartIndex:=0;
      Result.SectionVaild[i-1]:=false;
+    end
+   else if(basescript.Section[i-1].SectionMaxSize>0) and
+   (InternalOffset>=basescript.Section[i-1].SectionMaxSize) then
+    begin
+     writeln('ERROR:The Section '+basescript.Section[i-1].SectionName+' exceeds limited size '+
+     IntToStr(basescript.Section[i-1].SectionMaxSize)+'. cannot be linked then.');
+     readln;
+     halt;
     end
    else
     begin
@@ -5382,6 +5452,7 @@ var finalfile:unifile_file_final;
     StringSourcePointer:PChar;
     StringDestinationPointer:PChar;
     {For ELF File}
+    DynamicAllSize:SizeUint=0;
     DynamicItemCount:SizeUint;
     DynamicBool,GotBool,InitialBool,InitialArrayBool,FinalBool,FinalArrayBool:boolean;
     SymbolVersionBool:boolean;
@@ -5418,8 +5489,6 @@ var finalfile:unifile_file_final;
     q1:qword;
     {For Relocation in Relocatable File Only}
     AllSectionOffset:array of SizeUint;
-    {For Additional Symbols}
-    SectionStart,SectionCount:SizeUint;
     {For Interpreter Information}
     InterpreterInfo:unifile_elf_interpreter;
     {For Got Alias Symbol Index and Dynamic Alias Symbol Index}
@@ -5437,8 +5506,9 @@ var finalfile:unifile_file_final;
 label SkipGot;
 begin
  {Initialization of the software}
+ InterpreterInfo.DynamicLibraryResolveOffset:=0;
  DynamicBool:=false; GotBool:=false; GotPltOffset:=0;
- SectionStart:=0; SectionCount:=0; GotSymbolIndex:=0; DynamicSymbolIndex:=0;
+ GotSymbolIndex:=0; DynamicSymbolIndex:=0;
  finalfile.CoffSymbolTableContent:=nil; finalfile.CoffStringTableContent:=nil; FileList.NeedCount:=0;
  {Check the interpreter vaild}
  if(basescript.Interpreter<>'') then
@@ -5679,8 +5749,11 @@ begin
      SetLength(finalfile.SectionSize,j);
      finalfile.SectionSize[j-1]:=basefile.SectionContentInfo[i-1].ContentSize;
      SetLength(finalfile.SectionContent,j);
+     if(basefile.SectionAttribute[i-1] and unifile_attribute_not_in_file=0) then
      finalfile.SectionContent[j-1]:=allocmem(finalfile.SectionSize[j-1]);
      SectionIndex[i-1]:=j;
+     SetLength(finalfile.SectionAddressAbsolute,j);
+     finalfile.SectionAddressAbsolute[j]:=true;
      if(basefile.SectionAttribute[i-1] and unifile_attribute_not_in_file=0) then
       begin
        m:=1; e:=basefile.SectionContentInfo[i-1].ContentStartIndex;
@@ -5855,6 +5928,78 @@ begin
       end;
     end;
    if(a<=SegmentCount) and (i=SegmentIndex[a-1]) then inc(a);
+   if(i=basefile.SectionCount) and (fileclass=unifile_class_elf_file)
+   and(basescript.GenerateVersion) then
+    begin
+     SetLength(finalfile.SectionName,j);
+     finalfile.SectionName[j-1]:='.version';
+     SetLength(finalfile.SectionAttribute,j);
+     finalfile.SectionAttribute[j-1]:=0;
+     SetLength(finalfile.SectionAddress,j);
+     finalfile.SectionAddress[j-1]:=0;
+     SetLength(finalfile.SectionAlign,j);
+     finalfile.SectionAlign[j-1]:=1;
+     SetLength(finalfile.SectionContent,j);
+     finalfile.SectionContent[j-1]:=allocmem(length(basescript.VersionContent)+1);
+     m:=1;
+     while(m<=length(basescript.VersionContent))do
+      begin
+       PChar(finalfile.SectionContent[j-1]+m-1)^:=basescript.VersionContent[m];
+       inc(m);
+      end;
+     SetLength(finalfile.SectionSize,j);
+     finalfile.SectionSize[j-1]:=length(basescript.VersionContent)+1;
+     finalfile.SectionCount:=j;
+     inc(j);
+    end;
+   if(i=basefile.SectionCount) and (fileclass=unifile_class_elf_file)
+   and(basescript.GenerateLinkerSign) then
+    begin
+     SetLength(finalfile.SectionName,j);
+     finalfile.SectionName[j-1]:='.unidata';
+     SetLength(finalfile.SectionAttribute,j);
+     finalfile.SectionAttribute[j-1]:=0;
+     SetLength(finalfile.SectionAddress,j);
+     finalfile.SectionAddress[j-1]:=0;
+     SetLength(finalfile.SectionAlign,j);
+     finalfile.SectionAlign[j-1]:=1;
+     SetLength(finalfile.SectionContent,j);
+     finalfile.SectionContent[j-1]:=allocmem(length(basescript.LinkerSignContent)+1);
+     m:=1;
+     while(m<=length(basescript.LinkerSignContent))do
+      begin
+       PChar(finalfile.SectionContent[j-1]+m-1)^:=basescript.LinkerSignContent[m];
+       inc(m);
+      end;
+     SetLength(finalfile.SectionSize,j);
+     finalfile.SectionSize[j-1]:=length(basescript.LinkerSignContent)+1;
+     finalfile.SectionCount:=j;
+     inc(j);
+    end;
+   if(i=basefile.SectionCount) and (fileclass=unifile_class_elf_file)
+   and(basescript.GenerateCustomSign) then
+    begin
+     SetLength(finalfile.SectionName,j);
+     finalfile.SectionName[j-1]:=basescript.CustomSignSectionName;
+     SetLength(finalfile.SectionAttribute,j);
+     finalfile.SectionAttribute[j-1]:=0;
+     SetLength(finalfile.SectionAddress,j);
+     finalfile.SectionAddress[j-1]:=0;
+     SetLength(finalfile.SectionAlign,j);
+     finalfile.SectionAlign[j-1]:=1;
+     SetLength(finalfile.SectionContent,j);
+     finalfile.SectionContent[j-1]:=allocmem(length(basescript.CustomSignContent)+1);
+     m:=1;
+     while(m<=length(basescript.LinkerSignContent))do
+      begin
+       PChar(finalfile.SectionContent[j-1]+m-1)^:=basescript.CustomSignContent[m];
+       inc(m);
+      end;
+     SetLength(finalfile.SectionSize,j);
+     finalfile.SectionSize[j-1]:=length(basescript.CustomSignContent)+1;
+     finalfile.SectionCount:=j;
+     inc(j);
+    end;
    if(i=basefile.SectionCount) and (fileclass=unifile_class_elf_file) and
    (basescript.NoSymbol=false) then
     begin
@@ -5990,6 +6135,7 @@ begin
   end;
  if(basefile.ExternalNeeded) and (finalfile.GotTableList.GotCount>0) then GotPltOffset:=3;
  SetLength(finalfile.SectionOffset,finalfile.SectionCount);
+ SetLength(finalfile.SectionAddressAbsolute,finalfile.SectionCount);
  if(fileclass=unifile_class_elf_file) then
   begin
    SetLength(AllSectionOffset,finalfile.SectionCount);
@@ -6043,7 +6189,7 @@ begin
   end;
  if(basefile.SectionCount>0) and (basescript.EnableSectionInformation) then
   begin
-   a:=1; SectionStart:=j+1; SectionCount:=finalfile.SectionCount;
+   a:=1;
    while(a<=finalfile.SectionCount)do
     begin
      inc(j);
@@ -6346,11 +6492,36 @@ begin
      j:=1;
      while(j<=basescript.ImplicitCount)do
       begin
-       if(basescript.ImplicitName[j-1]='') and
+       if(basescript.ImplicitName[j-1]<>'') and
        (basescript.ImplicitName[j-1]=finalfile.SectionName[i-1]) then
         begin
          finalfile.SectionAddress[i-1]:=basescript.ImplicitAddress[j-1];
          basescript.ImplicitName[j-1]:='';
+         break;
+        end;
+       inc(j);
+      end;
+    end;
+  end;
+ {Then Check the maximum size of the Implicit Section Size}
+ if(basescript.ImplicitSizeCount>0) then
+  begin
+   for i:=1 to finalfile.SectionCount do
+    begin
+     j:=1;
+     while(j<=basescript.ImplicitSizeCount)do
+      begin
+       if(basescript.ImplicitSizeName[j-1]<>'') and
+       (basescript.ImplicitSizeName[j-1]=finalfile.SectionName[i-1]) then
+        begin
+         if(basescript.ImplicitSize[j-1]<=finalfile.SectionSize[i-1]) then
+          begin
+           writeln('ERROR:The Name '+basescript.ImplicitSizeName[j-1]+' size exceed the maximum size '+
+           IntToStr(basescript.ImplicitSize[j-1])+'. cannot be linked then.');
+           readln;
+           halt;
+          end;
+         basescript.ImplicitSizeName[j-1]:='';
          break;
         end;
        inc(j);
@@ -6797,7 +6968,18 @@ begin
        Offset:=unifile_align(Offset,finalfile.SectionAlign[i-1]);
       end;
      if(finalfile.SectionAddress[i-1]<=Address) and (finalfile.SectionAttribute[i-1]<>0)
-     then finalfile.SectionAddress[i-1]:=Address
+     then
+      begin
+       if(finalfile.SectionAddressAbsolute[i-1]) then
+        begin
+         writeln('ERROR:Section '+finalfile.SectionName[i-1]+' is absolutely addressed,cannot '+
+         ' be changed.');
+         readln;
+         halt;
+        end
+       else
+       finalfile.SectionAddress[i-1]:=Address;
+      end
      else if(finalfile.SectionAttribute[i-1]<>0) then
      Address:=finalfile.SectionAddress[i-1];
      finalfile.SectionOffset[i-1]:=Offset;
@@ -6905,30 +7087,7 @@ begin
        StringDestinationPointer:=finalfile.CoffStringTableContent+j;
        StringSourcePointer:=
        Pointer(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
-       k:=0;
-       while(k<StringLength)do
-        begin
-         if(StringLength>=k+8) then
-          begin
-           Pqword(StringDestinationPointer+k)^:=Pqword(StringSourcePointer+k)^;
-           inc(k,8);
-          end
-         else if(StringLength>=k+4) then
-          begin
-           Pdword(StringDestinationPointer+k)^:=Pdword(StringSourcePointer+k)^;
-           inc(k,4);
-          end
-         else if(StringLength>=k+2) then
-          begin
-           Pword(StringDestinationPointer+k)^:=Pword(StringSourcePointer+k)^;
-           inc(k,2);
-          end
-         else if(StringLength>=k+1) then
-          begin
-           Pbyte(StringDestinationPointer+k)^:=Pbyte(StringSourcePointer+k)^;
-           inc(k,1);
-          end;
-        end;
+       Move(StringSourcePointer^,StringDestinationPointer^,StringLength);
        inc(j,StringLength+1);
        Pcoff_symbol_table_item(finalfile.CoffSymbolTableContent+i-1)^.Name.Reserved:=0;
       end
@@ -9235,30 +9394,7 @@ begin
        StringDestinationPointer:=
        finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]+WritePointer1;
        StringSourcePointer:=Pointer(finalfile.DynamicList.DynamicItem[i-1].DynamicString);
-       j:=0;
-       while(j<StringLength)do
-        begin
-         if(StringLength>=j+8) then
-          begin
-           Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
-           inc(j,8);
-          end
-         else if(StringLength>=j+4) then
-          begin
-           Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
-           inc(j,4);
-          end
-         else if(StringLength>=j+2) then
-          begin
-           Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
-           inc(j,2);
-          end
-         else if(StringLength>=j+1) then
-          begin
-           Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
-           inc(j,1);
-          end;
-        end;
+       Move(StringSourcePointer^,StringDestinationPointer^,StringLength);
        inc(WritePointer1,StringLength+1);
       end;
     end;
@@ -9309,30 +9445,7 @@ begin
      finalfile.SectionContent[finalfile.DynamicStringTableIndex-1]+WritePointer1;
      StringSourcePointer:=
      Pointer(finalfile.DynamicSymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
-     j:=0;
-     while(j<StringLength)do
-      begin
-       if(StringLength>=j+8) then
-        begin
-         Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
-         inc(j,8);
-        end
-       else if(StringLength>=j+4) then
-        begin
-         Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
-         inc(j,4);
-        end
-       else if(StringLength>=j+2) then
-        begin
-         Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
-         inc(j,2);
-        end
-       else if(StringLength>=j+1) then
-        begin
-         Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
-         inc(j,1);
-        end;
-      end;
+     Move(StringSourcePointer^,StringDestinationPointer^,StringLength);
      inc(WritePointer1,StringLength+1); inc(WritePointer2);
     end;
    {Generate the Hash Table}
@@ -9465,30 +9578,7 @@ begin
          finalfile.SectionContent[finalfile.SymbolStringTableIndex-1]+WritePointer2;
          StringSourcePointer:=
          Pointer(finalfile.SymbolTable.SymbolName[finalfile.SymbolTableNewIndex[i-1]-1]);
-         j:=0;
-         while(j<StringLength)do
-          begin
-           if(StringLength>=j+8) then
-            begin
-             Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
-             inc(j,8);
-            end
-           else if(StringLength>=j+4) then
-            begin
-             Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
-             inc(j,4);
-            end
-           else if(StringLength>=j+2) then
-            begin
-             Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
-             inc(j,2);
-            end
-           else if(StringLength>=j+1) then
-            begin
-             Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
-             inc(j,1);
-            end;
-          end;
+         Move(StringSourcePointer^,StringDestinationPointer^,StringLength);
          inc(WritePointer2,StringLength+1);
         end;
        inc(WritePointer1);
@@ -9504,30 +9594,7 @@ begin
      StringDestinationPointer:=
      finalfile.SectionContent[finalfile.StringTableIndex-1]+WritePointer1;
      StringSourcePointer:=Pointer(finalfile.SectionName[i-1]);
-     j:=0;
-     while(j<StringLength)do
-      begin
-       if(StringLength>=j+8) then
-        begin
-         Pqword(StringDestinationPointer+j)^:=Pqword(StringSourcePointer+j)^;
-         inc(j,8);
-        end
-       else if(StringLength>=j+4) then
-        begin
-         Pdword(StringDestinationPointer+j)^:=Pdword(StringSourcePointer+j)^;
-         inc(j,4);
-        end
-       else if(StringLength>=j+2) then
-        begin
-         Pword(StringDestinationPointer+j)^:=Pword(StringSourcePointer+j)^;
-         inc(j,2);
-        end
-       else if(StringLength>=j+1) then
-        begin
-         Pbyte(StringDestinationPointer+j)^:=Pbyte(StringSourcePointer+j)^;
-         inc(j,1);
-        end;
-      end;
+     Move(StringSourcePointer^,StringDestinationPointer^,StringLength);
      finalfile.SectionNameIndex[i-1]:=WritePointer1;
      inc(WritePointer1,StringLength+1);
      inc(i);
