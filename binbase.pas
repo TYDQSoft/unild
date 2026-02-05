@@ -1394,10 +1394,6 @@ const elf_magic:array[1..4] of char=(#$7F,'E','L','F');
       elf_reloc_riscv_plt_32bit=59;
       elf_reloc_riscv_set_uleb128=60;
       elf_reloc_riscv_sub_uleb128=61;
-      elf_reloc_riscv_tls_descriptor_high_20bit=62;
-      elf_reloc_riscv_tls_descriptor_load_low_12bit=63;
-      elf_reloc_riscv_tls_descriptor_add_low_12bit=64;
-      elf_reloc_riscv_tls_descriptor_call=65;
       {ELF LoongArch ELF Flags}
       elf_flags_loongarch_modifier_mask=$07;
       elf_flags_loongarch_soft_float=$01;
@@ -1497,6 +1493,12 @@ const elf_magic:array[1..4] of char=(#$7F,'E','L','F');
       elf_reloc_loongarch_32_pc_relative=99;
       elf_reloc_loongarch_relax=100;
       elf_reloc_loongarch_align=102;
+      elf_reloc_loongarch_add6=105;
+      elf_reloc_loongarch_sub6=106;
+      elf_reloc_loongarch_add_uleb128=107;
+      elf_reloc_loongarch_sub_uleb128=108;
+      elf_reloc_loongarch_pc_relative_64bit=109;
+      elf_reloc_loongarch_call_36bit=110;
       {ELF RISC-V Type}
       elf_riscv_b_type=1;
       elf_riscv_cb_type=2;
@@ -1804,3 +1806,5 @@ begin
 end;
 
 end.
+
+

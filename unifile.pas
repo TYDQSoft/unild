@@ -3313,12 +3313,24 @@ function unifile_calculate_comple(value:SizeInt;bit:byte;ValueSigned:boolean=tru
 var mask:SizeUint;
     tempnum:SizeUint;
 begin
- if(ValueSigned) then mask:=SizeUint(-1) shr (sizeof(SizeUInt)*8-bit+1)
- else mask:=SizeUint(-1) shr (sizeof(SizeUInt)*8-bit);
- tempnum:=value and mask;
- if(value<0) then
+ if(bit<=64) then
   begin
-   tempnum:=SizeUInt(1) shl (bit-1)+tempnum;
+   if(ValueSigned) then mask:=SizeUint(-1) shr (sizeof(SizeUInt)*8-bit+1)
+   else mask:=SizeUint(-1) shr (sizeof(SizeUInt)*8-bit);
+   tempnum:=value and mask;
+   if(value<0) then
+    begin
+     tempnum:=SizeUInt(1) shl (bit-1)+tempnum;
+    end;
+  end
+ else
+  begin
+   if(ValueSigned) then mask:=SizeUint(-1) shr 1 else mask:=SizeUint(-1);
+   tempnum:=value and mask;
+   if(value<0) then
+    begin
+     tempnum:=SizeUInt(1) shl 63+tempnum;
+    end;
   end;
  Result:=tempnum;
 end;
@@ -4357,6 +4369,32 @@ begin
     begin
      Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[2];
      Result.Bits:=32; Result.GotType:=GotType;
+    end;
+   elf_reloc_loongarch_add6:
+    begin
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=6;
+    end;
+   elf_reloc_loongarch_sub6:
+    begin
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=6;
+    end;
+   elf_reloc_loongarch_add_uleb128:
+    begin
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=128;
+    end;
+   elf_reloc_loongarch_sub_uleb128:
+    begin
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]; Result.Bits:=128;
+    end;
+   elf_reloc_loongarch_pc_relative_64bit:
+    begin
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[2];
+     Result.Bits:=64;
+    end;
+   elf_reloc_loongarch_call_36bit:
+    begin
+     Result.AdjustValue:=RelocationData[0]+RelocationData[1]-RelocationData[2];
+     Result.Bits:=38;
     end;
    else exit(Result);
    end;
@@ -8571,6 +8609,19 @@ begin
      else if(FileResult.Bits=64) then
       begin
        Pqword(ChangePointer)^:=ChangeValue;
+      end
+     else if(FileResult.Bits=128) then
+      begin
+       if(FileResult.AdjustValue>=0) then
+        begin
+         Pqword(ChangePointer)^:=ChangeValue;
+         Pqword(ChangePointer+8)^:=0;
+        end
+       else
+        begin
+         Pqword(ChangePointer)^:=ChangeValue;
+         Pqword(ChangePointer+8)^:=SizeUint(-1);
+        end;
       end;
     end
    else if(finalfile.Architecture=elf_machine_loongarch) then
@@ -8942,14 +8993,22 @@ begin
        d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
       end
-     else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_32_pc_relative) then
+     else if(basefile.AdjustTable.AdjustType[i-1]=elf_reloc_loongarch_call_36bit) then
       begin
-       d1:=ChangeValue shr 12;
+       {The First is pcaddu18i}
+       d1:=ChangeValue shr 18;
        d2:=Pdword(ChangePointer)^;
        Pdword(ChangePointer)^:=d2+d1 shl 5;
-       d1:=ChangeValue and $FFF;
-       d2:=Pdword(ChangePointer+4)^;
-       Pdword(ChangePointer+4)^:=d2+d1 shl 10;
+       {The Second is jirl}
+       d1:=ChangeValue shr 2 and $FFFF;
+       d2:=Pdword(ChangePointer)^;
+       Pdword(ChangePointer)^:=d2+d1 shl 10;
+      end
+     else if(FileResult.Bits=6) then
+      begin
+       d1:=Pbyte(ChangePointer)^ and $C0;
+       d2:=ChangeValue or d1;
+       Pbyte(ChangePointer)^:=d2;
       end
      else if(FileResult.Bits=8) then
       begin
@@ -8967,6 +9026,19 @@ begin
       begin
        Pqword(ChangePointer)^:=ChangeValue;
       end
+     else if(FileResult.Bits=128) then
+      begin
+       if(FileResult.AdjustValue>0) then
+        begin
+         Pqword(ChangePointer)^:=ChangeValue;
+         Pqword(ChangePointer+8)^:=0;
+        end
+       else
+        begin
+         Pqword(ChangePointer)^:=ChangeValue;
+         Pqword(ChangePointer+8)^:=SizeUint(-1);
+        end;
+      end;
     end;
   end;
  {If the Convertion to Relocation Exists,PE .reloc should be reconstructed.}
