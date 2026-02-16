@@ -1181,6 +1181,7 @@ begin
  else if(Script.IsEFIFile) or (Script.IsUntypedBinary) then
  Script:=unild_generate_default_other_file
  else Script:=unild_generate_default_elf_file;
+ writeln(Script.EntryName);
  if(Script.BaseAddress<>0) and (Script.IsEFIFile=false) and (Script.IsUntypedBinary=false) then
   begin
    Script.NoFixedAddress:=false; Script.Interpreter:='';

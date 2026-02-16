@@ -2452,7 +2452,8 @@ begin
  i:=1;
  if(Result.EntryName='') and (not ((Result.elfclass<=1) and (Result.IsEFIFile=false)
  and (Result.IsUntypedBinary=false))) then Result.EntryName:='_start'
- else if(Result.EntryName<>'') then Result.EntryName:='';
+ else if(Result.EntryName<>'') and (Result.elfclass<=1) and (Result.IsEFIFile=false)
+ and (Result.IsUntypedBinary=false) then Result.EntryName:='';
  if((Result.elfclass<=1) and (Result.IsEFIFile=false) and (Result.IsUntypedBinary=false)) then
  Result.SmartLinking:=false;
  if(Result.FileAlign=0) then Result.FileAlign:=$1000;
