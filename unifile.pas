@@ -367,6 +367,7 @@ type unifile_elf_object_file_symbol_table=packed record
                            end;
 
 var unifile_fileList:unifile_file_list_settings;
+    unifile_linkerwait:boolean=false;
 
       {For Bits Constant}
 const unifile_bit_32=32;
@@ -422,6 +423,14 @@ var basescript:unild_script;filename:string;fileclass:byte);
 
 implementation
 
+procedure unifile_raise_error(ErrorStage:string;ErrorDetail:string;ErrorTip:string;NeedStop:boolean);
+begin
+ writeln('ERROR emerges in '+ErrorStage+' stage:');
+ writeln('ERROR:'+ErrorDetail);
+ writeln('What to do:'+ErrorTip);
+ if(NeedStop) then readln;
+ halt;
+end;
 procedure unifile_filelist_initialize;
 begin
  unifile_filelist.FileCount:=0;
@@ -573,25 +582,25 @@ begin
  if(elf_check_signature(Pelf32_header(SharedContent)^.elf_id)=false) then
   begin
    FreeMem(SharedContent);
-   writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF Format Dynamic Library.');
-   readln;
-   halt;
+   unifile_raise_error('Dynamic Library Reading',
+   DynamicLibraryPath+' is not a vaild ELF Format Dynamic Library.',
+   'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
   end;
  if(CheckBits=32) and
  (Pelf32_header(SharedContent)^.elf_id[elf_class_position]<>elf_class_32) then
   begin
    FreeMem(SharedContent);
-   writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF 32-bit Dynamic Library.');
-   readln;
-   halt;
+   unifile_raise_error('Dynamic Library Reading',
+   DynamicLibraryPath+' is not a vaild ELF 32-bit Dynamic Library.',
+   'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
   end
  else if(CheckBits=64) and
  (Pelf64_header(SharedContent)^.elf_id[elf_class_position]<>elf_class_64) then
   begin
    FreeMem(SharedContent);
-   writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF 64-bit Dynamic Library.');
-   readln;
-   halt;
+   unifile_raise_error('Dynamic Library Reading',
+   DynamicLibraryPath+' is not a vaild ELF 64-bit Dynamic Library.',
+   'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
   end;
  if(CheckBits=32) then
   begin
@@ -599,17 +608,17 @@ begin
    if(Pelf32_header(SharedContent)^.elf_type<>elf_type_dynamic) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:File '+DynamicLibraryPath+' is not the Shared Object File.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     DynamicLibraryPath+' is not the Shared Object File.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    {Check the Architecture of the Dynamic Library}
    if(Pelf32_header(SharedContent)^.elf_machine<>CheckArchitecture) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF Dynamic Library with corresponding architecture.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     DynamicLibraryPath+' is not a vaild ELF Dynamic Library with Specified architecture.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    {Get the Program Header Offset and its Count}
    SearchOffset:=SharedContent+Pelf32_header(SharedContent)^.elf_program_header_offset;
@@ -632,10 +641,9 @@ begin
    if(i>SearchCount) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Cannot find dynamic section in Dynamic Library '+DynamicLibraryPath+
-     '.Dynamic Library is not vaild.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Cannot find dynamic section in Dynamic Library '+DynamicLibraryPath+'. Dynamic Library is not vaild.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    {Then find the .hash,.dynsym and .dynstr section.}
    i:=1;
@@ -674,10 +682,10 @@ begin
        elf_dynamic_flag_1_pie<>0) then
         begin
          FreeMem(SharedContent);
-         writeln('ERROR:This dynamic library '+DynamicLibraryPath+' is not a dynamic library but '+
-         ' a PIE(Position-Independent Executable).');
-         readln;
-         halt;
+         unifile_raise_error('Dynamic Library Reading',
+         'This dynamic library '+DynamicLibraryPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable).',
+         'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
         end;
       end;
      inc(i);
@@ -685,25 +693,24 @@ begin
    if(HashPointer=nil) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Hash Table missing,cannot determine the symbol count of the library '+
-     DynamicLibraryPath);
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Hash Table missing,cannot determine the symbol count of the library '+DynamicLibraryPath,
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    DynamicSymbolTableCount:=(Pdword(HashPointer)^-1) shr 1;
    if(DynamicSymbolTablePointer=nil) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Dynamic Symbol Table Missing,cannot parse the dynamic symbol table.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Dynamic Symbol Table Missing,cannot parse the dynamic symbol table.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    if(DynamicStringTablePointer=nil) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Dynamic String Table Missing,cannot parse the dynamic symbol table.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Dynamic String Table Missing,cannot parse the dynamic symbol table.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    Result.SharedObjectName:=PChar(DynamicStringTablePointer+DynamicSharedObjectNameIndex);
    SetLength(Result.SymbolName,DynamicSymbolTableCount-1);
@@ -729,7 +736,7 @@ begin
      Result.SymbolName[i-1]:=
      PChar(DynamicStringTablePointer+Pelf32_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
      sizeof(elf32_symbol_table_entry))^.symbol_name);
-     Result.SymbolNameHash[i-1]:=unihash_generate_value(Result.SymbolName[i-1],false);
+     Result.SymbolNameHash[i-1]:=unihash_generate_value(Result.SymbolName[i-1]);
      inc(j);
     end;
    Result.SymbolCount:=i;
@@ -740,17 +747,17 @@ begin
    if(Pelf64_header(SharedContent)^.elf_type<>elf_type_dynamic) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:File '+DynamicLibraryPath+' is not the Shared Object File.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     DynamicLibraryPath+' is not the Shared Object File.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    {Check the Architecture of the Dynamic Library}
    if(Pelf64_header(SharedContent)^.elf_machine<>CheckArchitecture) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:'+DynamicLibraryPath+' is not a vaild ELF Dynamic Library with corresponding architecture.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     DynamicLibraryPath+' is not a vaild ELF Dynamic Library with Specified architecture.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    {Get the Program Header Offset and its Count}
    SearchOffset:=SharedContent+Pelf64_header(SharedContent)^.elf_program_header_offset;
@@ -774,10 +781,9 @@ begin
    if(i>SearchCount) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Cannot find dynamic section in Dynamic Library '+DynamicLibraryPath+
-     '.Dynamic Library is not vaild.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Cannot find dynamic section in Dynamic Library '+DynamicLibraryPath+'. Dynamic Library is not vaild.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    {Then find the .hash,.dynsym and .dynstr section.}
    i:=1;
@@ -816,10 +822,10 @@ begin
        elf_dynamic_flag_1_pie<>0) then
         begin
          FreeMem(SharedContent);
-         writeln('ERROR:This dynamic library '+DynamicLibraryPath+' is not a dynamic library but '+
-         ' a PIE(Position-Independent Executable).');
-         readln;
-         halt;
+         unifile_raise_error('Dynamic Library Reading',
+         'This dynamic library '+DynamicLibraryPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable).',
+         'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
         end;
       end;
      inc(i);
@@ -827,25 +833,24 @@ begin
    if(HashPointer=nil) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Hash Table missing,cannot determine the symbol count of the library '+
-     DynamicLibraryPath);
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Hash Table missing,cannot determine the symbol count of the library '+DynamicLibraryPath,
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    DynamicSymbolTableCount:=(Pdword(HashPointer)^-1) shr 1;
    if(DynamicSymbolTablePointer=nil) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Dynamic Symbol Table Missing,cannot parse the dynamic symbol table.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Dynamic Symbol Table Missing,cannot parse the dynamic symbol table.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    if(DynamicStringTablePointer=nil) then
     begin
      FreeMem(SharedContent);
-     writeln('ERROR:Dynamic String Table Missing,cannot parse the dynamic symbol table.');
-     readln;
-     halt;
+     unifile_raise_error('Dynamic Library Reading',
+     'Dynamic String Table Missing,cannot parse the dynamic symbol table.',
+     'Please check the '+DynamicLibraryPath+' to more information.',unifile_linkerwait);
     end;
    Result.SharedObjectName:=PChar(DynamicStringTablePointer+DynamicSharedObjectNameIndex);
    SetLength(Result.SymbolName,DynamicSymbolTableCount-1);
@@ -871,7 +876,7 @@ begin
      Result.SymbolName[i-1]:=
      PChar(DynamicStringTablePointer+Pelf64_symbol_table_entry(DynamicSymbolTablePointer+(j-1)*
      sizeof(elf64_symbol_table_entry))^.symbol_name);
-     Result.SymbolNameHash[i-1]:=unihash_generate_value(Result.SymbolName[i-1],false);
+     Result.SymbolNameHash[i-1]:=unihash_generate_value(Result.SymbolName[i-1]);
      inc(j);
     end;
    Result.SymbolCount:=i;
@@ -988,25 +993,25 @@ begin
  if(elf_check_signature(Pelf32_header(InterpreterContent)^.elf_id)=false) then
   begin
    FreeMem(InterpreterContent);
-   writeln('ERROR:Interpreter is not the ELF Format File.');
-   readln;
-   halt;
+   unifile_raise_error('Checking Interpreter',
+   'Interpreter is not the ELF Format File.',
+   'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
   end;
  if(CheckBits=32) and
  (Pelf32_header(InterpreterContent)^.elf_id[elf_class_position]<>elf_class_32) then
   begin
    FreeMem(InterpreterContent);
-   writeln('ERROR:Interpreter is not the ELF File correspond to the 32-bit file.');
-   readln;
-   halt;
+   unifile_raise_error('Checking Interpreter',
+   'Interpreter is not the ELF 32-bit file.',
+   'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
   end
  else if(CheckBits=64) and
- (Pelf32_header(InterpreterContent)^.elf_id[elf_class_position]<>elf_class_64) then
+ (Pelf64_header(InterpreterContent)^.elf_id[elf_class_position]<>elf_class_64) then
   begin
    FreeMem(InterpreterContent);
-   writeln('ERROR:Interpreter is not the ELF File correspond to the 64-bit file.');
-   readln;
-   halt;
+   unifile_raise_error('Checking Interpreter',
+   'Interpreter is not the ELF 64-bit file',
+   'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
   end;
  if(CheckBits=32) then
   begin
@@ -1014,17 +1019,17 @@ begin
    if(Pelf32_header(InterpreterContent)^.elf_type<>elf_type_dynamic) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:File '+InterpreterPath+' is not the Shared Object File.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'File '+InterpreterPath+' is not the Shared Object File.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    {Check the Interpreter is equal to the output file architecture}
    if(Pelf32_header(InterpreterContent)^.elf_machine<>CheckArchitecture) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Interpreter Architecture is not equal the Executable Architecture.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Interpreter Architecture is not equal the Executable Architecture.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    {Search for Dynamic Section}
    SearchOffset:=Pelf32_header(InterpreterContent)^.elf_program_header_offset;
@@ -1047,9 +1052,9 @@ begin
    if(i>SearchCount) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Cannot find the dynamic section in interpreter '+InterpreterPath);
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Cannot find the dynamic section in interpreter '+InterpreterPath,
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    i:=1;
    HashPointer:=nil; DynamicSymbolPointer:=nil; DynamicSymbolCount:=0; DynamicStringPointer:=nil;
@@ -1080,10 +1085,10 @@ begin
        elf_dynamic_flag_1_pie<>0) then
         begin
          FreeMem(InterpreterContent);
-         writeln('ERROR:This dynamic library '+InterpreterPath+' is not a dynamic library but '+
-         ' a PIE(Position-Independent Executable),Interpreter should be a dynamic library.');
-         readln;
-         halt;
+         unifile_raise_error('Checking Interpreter',
+         'This dynamic library '+InterpreterPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable),Interpreter should be a dynamic library.',
+         'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
         end;
       end;
      inc(i);
@@ -1091,23 +1096,23 @@ begin
    if(HashPointer=nil) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Hash Section does not exist,cannot determine the count of the symbol table.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Hash Section does not exist,cannot determine the count of the symbol table.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    if(DynamicStringPointer=nil) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Dynamic String Table Section does not exist,cannot know the symbol name.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Dynamic String Table Section does not exist,cannot know the symbol name.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    if(DynamicSymbolPointer=nil) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Dynamic Symbol Table does not exist,cannot acquire the symbol attributes.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Dynamic Symbol Table does not exist,cannot acquire the symbol attributes.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    {Translate the hash data to data structure of the linker}
    tempnum1:=Pdword(HashPointer)^;
@@ -1143,10 +1148,9 @@ begin
    if(FunctionIndex=0) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction
-     + 'not found in interpreter.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Needed Function '+basescript.InterpreterDynamicLinkFunction+ 'not found in interpreter.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    Result.DynamicLibraryResolveOffset:=
    Pelf32_symbol_table_entry(DynamicSymbolPointer+(
@@ -1154,10 +1158,9 @@ begin
    if(Result.DynamicLibraryResolveOffset=0) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction+' exists but invaild '+
-     'in the interpreter.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Needed Function '+basescript.InterpreterDynamicLinkFunction+' exists but invaild in the interpreter.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
   end
  else if(CheckBits=64) then
@@ -1166,17 +1169,17 @@ begin
    if(Pelf64_header(InterpreterContent)^.elf_type<>elf_type_dynamic) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:File '+InterpreterPath+' is not the Shared Object File.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'File '+InterpreterPath+' is not the Shared Object File.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    {Check the Interpreter is equal to the output file architecture}
    if(Pelf64_header(InterpreterContent)^.elf_machine<>CheckArchitecture) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Interpreter Architecture is not equal the Executable Architecture.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Interpreter Architecture is not equal the Executable Architecture.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    {Search for Dynamic Section}
    SearchOffset:=Pelf64_header(InterpreterContent)^.elf_program_header_offset;
@@ -1199,9 +1202,9 @@ begin
    if(i>SearchCount) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Cannot find the dynamic section in interpreter '+InterpreterPath);
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Cannot find the dynamic section in interpreter '+InterpreterPath,
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    i:=1;
    HashPointer:=nil; DynamicSymbolPointer:=nil; DynamicSymbolCount:=0; DynamicStringPointer:=nil;
@@ -1232,10 +1235,10 @@ begin
        elf_dynamic_flag_1_pie<>0) then
         begin
          FreeMem(InterpreterContent);
-         writeln('ERROR:This dynamic library '+InterpreterPath+' is not a dynamic library but '+
-         ' a PIE(Position-Independent Executable),Interpreter should be a dynamic library.');
-         readln;
-         halt;
+         unifile_raise_error('Checking Interpreter',
+         'This dynamic library '+InterpreterPath+' is not a dynamic library but '+
+         ' a PIE(Position-Independent Executable),Interpreter should be a dynamic library.',
+         'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
         end;
       end;
      inc(i);
@@ -1243,23 +1246,23 @@ begin
    if(HashPointer=nil) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Hash Section does not exist,cannot determine the count of the symbol table.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Hash Section does not exist,cannot determine the count of the symbol table.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    if(DynamicStringPointer=nil) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Dynamic String Table Section does not exist,cannot know the symbol name.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Dynamic String Table Section does not exist,cannot know the symbol name.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    if(DynamicSymbolPointer=nil) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Dynamic Symbol Table does not exist,cannot acquire the symbol attributes.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Dynamic Symbol Table does not exist,cannot acquire the symbol attributes.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    {Translate the hash data to data structure of the linker}
    tempnum1:=Pdword(HashPointer)^;
@@ -1275,7 +1278,7 @@ begin
     begin
      Result.InterpreterSymbolHash[i-1]:=
      unifile_elf_hash(PChar(DynamicStringPointer+
-     Pelf64_symbol_table_entry(DynamicSymbolPointer+(i-1)*sizeof(elf64_symbol_table_entry))^.symbol_name));
+     Pelf32_symbol_table_entry(DynamicSymbolPointer+(i-1)*sizeof(elf32_symbol_table_entry))^.symbol_name));
     end;
    for i:=1 to Result.InterpreterHashTable.BucketCount do
     begin
@@ -1295,10 +1298,9 @@ begin
    if(FunctionIndex=0) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction
-     + 'not found in interpreter.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Needed Function '+basescript.InterpreterDynamicLinkFunction+ 'not found in interpreter.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
    Result.DynamicLibraryResolveOffset:=
    Pelf64_symbol_table_entry(DynamicSymbolPointer+(
@@ -1306,10 +1308,9 @@ begin
    if(Result.DynamicLibraryResolveOffset=0) then
     begin
      FreeMem(InterpreterContent);
-     writeln('ERROR:Needed Function '+basescript.InterpreterDynamicLinkFunction+' exists but invaild '+
-     'in the interpreter.');
-     readln;
-     halt;
+     unifile_raise_error('Checking Interpreter',
+     'Needed Function '+basescript.InterpreterDynamicLinkFunction+' exists but invaild in the interpreter.',
+     'Please Check the interpreter '+InterpreterPath+' for more information.',unifile_linkerwait);
     end;
   end;
  FreeMem(InterpreterContent);
@@ -1337,9 +1338,8 @@ begin
  {Read the elf object file in disk}
  if(not FileExists(fn)) then
   begin
-   writeln('ERROR:'+fn+' does not exist.');
-   readln;
-   halt;
+   unifile_raise_error('Checking Objects Existence',fn+' does not exist.',
+   'Please Check the Object File '+fn+' for more information.',unifile_linkerwait);
   end;
  fs:=TFileStream.Create(fn,fmOpenRead);
  OriginalContent:=allocmem(fs.Size);
@@ -1351,9 +1351,9 @@ begin
  if(elf_check_signature(Pelf32_header(OriginalContent)^.elf_id)=false) then
   begin
    FreeMem(OriginalContent);
-   writeln('ERROR:File '+fn+' is not a vaild elf file.');
-   readln;
-   halt;
+   unifile_raise_error('Reading Object File',
+   'File '+fn+' is not a vaild ELF file.',
+   'Please Check the Object File '+fn+' for more information.',unifile_linkerwait);
   end;
  if(Pelf32_header(OriginalContent)^.elf_id[elf_class_position]=elf_class_32) then
  Result.Bits:=unifile_bit_32
@@ -1362,9 +1362,9 @@ begin
  else
   begin
    FreeMem(OriginalContent);
-   writeln('ERROR:File '+fn+' elf file class is invaild.');
-   readln;
-   halt;
+   unifile_raise_error('Reading Object File',
+   'File '+fn+' elf file class is invaild.',
+   'Please Check the Object File '+fn+' for more information.',unifile_linkerwait);
   end;
  if(Result.Bits=32) then
   begin
@@ -1372,9 +1372,9 @@ begin
    if(Pelf32_header(OriginalContent)^.elf_type>elf_type_relocatable) then
     begin
      FreeMem(OriginalContent);
-     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
-     readln;
-     halt;
+     unifile_raise_error('Reading Object File',
+     'File '+fn+' is not untyped or relocatable 32-bit file,cannot be linked.',
+     'Please Check the Object File '+fn+' for more information.',unifile_linkerwait);
     end;
    Result.Relocatable:=Pelf32_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end
@@ -1384,9 +1384,9 @@ begin
    if(Pelf64_header(OriginalContent)^.elf_type>elf_type_relocatable) then
     begin
      FreeMem(OriginalContent);
-     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
-     readln;
-     halt;
+     unifile_raise_error('Reading Object File',
+     'File '+fn+' is not untyped or relocatable 64-bit file,cannot be linked.',
+     'Please Check the Object File '+fn+' for more information.',unifile_linkerwait);
     end;
    Result.Relocatable:=Pelf64_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end;
@@ -1616,7 +1616,7 @@ begin
   end;
  Result.SectionCount:=SectionCount+COMMONCount;
 end;
-function unifile_read_elf_file_from_memory(Ptr:Pointer;fn:string):unifile_elf_object_file;
+function unifile_read_elf_file_from_memory(Ptr:Pointer;fn:string;Archive:string):unifile_elf_object_file;
 var OriginalContent:Pointer;
     i,j:SizeUint;
     {For Section Analysis}
@@ -1639,9 +1639,9 @@ begin
  {Then Check the elf file}
  if(elf_check_signature(Pelf32_header(OriginalContent)^.elf_id)=false) then
   begin
-   writeln('ERROR:File '+fn+' is not a vaild elf file.');
-   readln;
-   halt;
+   unifile_raise_error('Reading Object File in Archive file',
+   'File '+fn+' is not a vaild elf file.',
+   'Please check the the File '+fn+' in Archive File '+Archive+' for more information.',unifile_linkerwait);
   end;
  if(Pelf32_header(OriginalContent)^.elf_id[elf_class_position]=elf_class_32) then
  Result.Bits:=unifile_bit_32
@@ -1649,9 +1649,9 @@ begin
  Result.Bits:=unifile_bit_64
  else
   begin
-   writeln('ERROR:File '+fn+' elf file class is invaild.');
-   readln;
-   halt;
+   unifile_raise_error('Reading Object File in Archive file',
+   'File '+fn+' elf file class is invaild.',
+   'Please check the the File '+fn+' in Archive File '+Archive+' for more information.',unifile_linkerwait);
   end;
  if(Result.Bits=32) then
   begin
@@ -1659,9 +1659,9 @@ begin
    if(Pelf32_header(OriginalContent)^.elf_type>elf_type_relocatable) then
     begin
      FreeMem(OriginalContent);
-     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
-     readln;
-     halt;
+     unifile_raise_error('Reading Object File in Archive file',
+     'File'+fn+' is not untyped or relocatable 32-bit file,cannot be linked.',
+     'Please check the the File '+fn+' in Archive File '+Archive+' for more information.',unifile_linkerwait);
     end;
    Result.Relocatable:=Pelf32_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end
@@ -1671,9 +1671,9 @@ begin
    if(Pelf64_header(OriginalContent)^.elf_type>elf_type_relocatable) then
     begin
      FreeMem(OriginalContent);
-     writeln('ERROR:File'+fn+' is not untyped or relocatable file,cannot be linked.');
-     readln;
-     halt;
+     unifile_raise_error('Reading Object File in Archive file',
+     'File'+fn+' is not untyped or relocatable 64-bit file,cannot be linked.',
+     'Please check the the File '+fn+' in Archive File '+Archive+' for more information.',unifile_linkerwait);
     end;
    Result.Relocatable:=Pelf64_header(OriginalContent)^.elf_type=elf_type_relocatable;
   end;
@@ -1915,9 +1915,9 @@ begin
  {Read the elf object file in disk}
  if(not FileExists(fn)) then
   begin
-   writeln('ERROR:'+fn+' does not exist.');
-   readln;
-   halt;
+   unifile_raise_error('Checking Archive File Existence',
+   fn+' does not exist.',
+   'Please check the the Archive File '+fn+' for more information.',unifile_linkerwait);
   end;
  fs:=TFileStream.Create(fn,fmOpenRead);
  OriginalContent:=allocmem(fs.Size);
@@ -1928,9 +1928,9 @@ begin
  if(elf_check_archive_signature(OriginalContent)=false) then
   begin
    FreeMem(OriginalContent);
-   writeln('ERROR:File '+fn+ 'is not an elf archive file.');
-   readln;
-   halt;
+   unifile_raise_error('Checking Archive File Existence',
+   'File '+fn+ 'is not an elf archive file.',
+   'Please check the the Archive File '+fn+' for more information.',unifile_linkerwait);
   end;
  ArchiveTotalSize:=fs.Size;
  fs.Free;
@@ -1969,7 +1969,7 @@ begin
      inc(Result.ObjectCount);
      SetLength(Result.Objects,Result.ObjectCount);
      Result.Objects[Result.ObjectCount-1]:=
-     unifile_read_elf_file_from_memory(OriginalContent+offset1,ArchiveFileName);
+     unifile_read_elf_file_from_memory(OriginalContent+offset1,ArchiveFileName,fn);
      inc(offset1,ArchivePortionSize);
     end
    else
@@ -1978,7 +1978,7 @@ begin
      inc(Result.ObjectCount);
      SetLength(Result.Objects,Result.ObjectCount);
      Result.Objects[Result.ObjectCount-1]:=
-     unifile_read_elf_file_from_memory(OriginalContent+offset1,ArchiveFileName);
+     unifile_read_elf_file_from_memory(OriginalContent+offset1,ArchiveFileName,fn);
      inc(offset1,ArchivePortionSize);
     end;
   end;
@@ -2116,7 +2116,7 @@ begin
       begin
        tempstr:=tempstr+unifile_generate_index(i-1,0);
       end;
-     Result.SectionSymbolTable.SymbolNameHash[m-1]:=unihash_generate_value(tempstr,false);
+     Result.SectionSymbolTable.SymbolNameHash[m-1]:=unihash_generate_value(tempstr);
      tempstr:='';
      if(totalfile.Objects[i-1].SymbolTable.SymbolSectionIndex[j-1]<>0)
      and(totalfile.Objects[i-1].SymbolTable.SymbolSectionIndex[j-1]<
@@ -2128,7 +2128,7 @@ begin
        tempstr:=Result.SectionSymbolTable.SymbolSectionName[m-1]+
        unifile_generate_index(i-1,0);
        Result.SectionSymbolTable.SymbolSectionNameHash[m-1]:=
-       unihash_generate_value(tempstr,true);
+       unihash_generate_value(tempstr);
       end;
      Result.SectionSymbolTable.SymbolType[m-1]:=totalfile.Objects[i-1].SymbolTable.SymbolType[j-1];
      Result.SectionSymbolTable.SymbolSize[m-1]:=totalfile.Objects[i-1].SymbolTable.SymbolSize[j-1];
@@ -2152,7 +2152,7 @@ begin
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
          tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(tempstr,true);
+         unihash_generate_value(tempstr);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 12;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 12);
@@ -2192,7 +2192,7 @@ begin
              tempstr:=tempstr+unifile_generate_index(i-1,0);
             end;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
-           unihash_generate_value(tempstr,false);
+           unihash_generate_value(tempstr);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
            elf32_reloc_type(Pelf32_rela(ContentPointer+(k-1)*12)^.Info);
           end;
@@ -2203,7 +2203,7 @@ begin
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
          tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(tempstr,true);
+         unihash_generate_value(tempstr);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 24;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 24);
@@ -2243,7 +2243,7 @@ begin
              tempstr:=tempstr+unifile_generate_index(i-1,0);
             end;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
-           unihash_generate_value(tempstr,false);
+           unihash_generate_value(tempstr);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
            elf64_reloc_type(Pelf64_rela(ContentPointer+(k-1)*24)^.Info);
           end;
@@ -2261,7 +2261,7 @@ begin
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
          tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(tempstr,true);
+         unihash_generate_value(tempstr);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 8;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 8);
@@ -2300,7 +2300,7 @@ begin
              tempstr:=tempstr+unifile_generate_index(i-1,0);
             end;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
-           unihash_generate_value(tempstr,false);
+           unihash_generate_value(tempstr);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
            elf32_reloc_type(Pelf32_rel(ContentPointer+(k-1)*8)^.Info);
           end;
@@ -2311,7 +2311,7 @@ begin
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSection:=tempstr;
          tempstr:=tempstr+unifile_generate_index(i-1,0);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSectionHash:=
-         unihash_generate_value(tempstr,true);
+         unihash_generate_value(tempstr);
          Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationCount:=ContentSize div 16;
          SetLength(Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationOffset,
          ContentSize div 16);
@@ -2350,7 +2350,7 @@ begin
              tempstr:=tempstr+unifile_generate_index(i-1,0);
             end;
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationSymbolHash[k-1]:=
-           unihash_generate_value(tempstr,false);
+           unihash_generate_value(tempstr);
            Result.SectionRelocation[Result.SectionRelocationCount-1].RelocationType[k-1]:=
            elf64_reloc_type(Pelf64_rel(ContentPointer+(k-1)*16)^.Info);
           end;
@@ -2372,7 +2372,7 @@ begin
        tempstr:=totalfile.Objects[i-1].SectionName[j-1];
        Result.SectionName[Result.SectionCount-1]:=tempstr;
        tempstr:=tempstr+unifile_generate_index(i-1,0);
-       Result.SectionNameHash[Result.SectionCount-1]:=unihash_generate_value(tempstr,true);
+       Result.SectionNameHash[Result.SectionCount-1]:=unihash_generate_value(tempstr);
        Result.SectionFlag[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionFlag[j-1];
        Result.SectionType[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionType[j-1];
        Result.SectionSize[Result.SectionCount-1]:=totalfile.Objects[i-1].SectionSize[j-1];
@@ -2647,23 +2647,34 @@ begin
    inc(i);
   end;
  {Then Check the Vaild Content}
- EntryHash:=unihash_generate_value(basescript.EntryName,false);
+ EntryHash:=unihash_generate_value(basescript.EntryName);
  RelocationList.RelocationCount:=basefile.SectionRelocationCount;
  RelocationList.Relocation:=basefile.SectionRelocation;
- c:=unifile_get_smartlinking(SectionHash,SymbolHash,RelocationHash,basefile.SectionSymbolTable,
- RelocationList,SectionVaild,EntryHash);
- if(c=0) then
+ if(not ((basescript.elfclass<=1) and (basescript.IsEFIFile=false) and (basescript.IsUntypedBinary=false))) then
   begin
-   writeln('ERROR:Entry '+basescript.EntryName+' not found.');
-   readln;
-   halt;
+   Result.EntryName:=basescript.EntryName; Result.EntryHash:=EntryHash;
+   c:=unifile_get_smartlinking(SectionHash,SymbolHash,RelocationHash,basefile.SectionSymbolTable,
+   RelocationList,SectionVaild,EntryHash);
+   if(c=0) and (not ((basescript.elfclass<=1) and (basescript.IsEFIFile=false)
+   and (basescript.IsUntypedBinary=false))) then
+    begin
+     unifile_raise_error('Finding the Entry Point of the preinitialization the Output File.',
+     'Entry '+basescript.EntryName+' not found.',
+     'Please check the input object files for more information.',unifile_linkerwait);
+    end;
+   Result.EntrySection:=basefile.SectionSymbolTable.SymbolSectionName[c-1];
+   Result.EntrySectionHash:=basefile.SectionSymbolTable.SymbolSectionNameHash[c-1];
+   Result.EntrySectionIndex:=0; c:=0; EntrySectionEstimatedIndex:=0;
+  end
+ else
+  begin
+   Result.EntryName:=''; Result.EntryHash:=0;
+   Result.EntrySection:=''; Result.EntrySectionHash:=0;
+   Result.EntrySectionIndex:=0; c:=0; EntrySectionEstimatedIndex:=0;
   end;
- Result.EntryName:=basescript.EntryName; Result.EntryHash:=EntryHash;
- Result.EntrySection:=basefile.SectionSymbolTable.SymbolSectionName[c-1];
- Result.EntrySectionHash:=basefile.SectionSymbolTable.SymbolSectionNameHash[c-1];
- Result.EntrySectionIndex:=0; c:=0; EntrySectionEstimatedIndex:=0;
  {If EntryAsStartSection Needs,Find the Real Section Index of the linker-generated section.}
- if(basescript.EntryAsStartOfSection) then
+ if(not ((basescript.elfclass<=1) and (basescript.IsEFIFile=false)
+ and (basescript.IsUntypedBinary=false))) and (basescript.EntryAsStartOfSection) then
   begin
    i:=1;
    while(i<=basescript.SectionCount)do
@@ -2688,7 +2699,8 @@ begin
      inc(i);
     end;
    EntrySectionEstimatedIndex:=i;
-  end;
+  end
+ else EntrySectionEstimatedIndex:=0;
  {Then Generate the First stage file}
  Result.Architecture:=basefile.Architecture; Result.Bits:=basefile.Bits;
  Result.SectionCount:=basescript.SectionCount;
@@ -2705,7 +2717,7 @@ begin
   begin
    InternalOffsetAlternative:=0;
    Result.SectionName[i-1]:=basescript.Section[i-1].SectionName;
-   Result.SectionNameHash[i-1]:=unihash_generate_value(Result.SectionName[i-1],true);
+   Result.SectionNameHash[i-1]:=unihash_generate_value(Result.SectionName[i-1]);
    InternalOffsetAlterNative:=0; j:=1; AttributeData:=0; NoAttribute:=false;
    while(j<=basescript.Section[i-1].SectionAttributeCount)do
     begin
@@ -2904,10 +2916,10 @@ begin
    Result.SectionAttribute[i-1]:=AttributeData;
    if(InternalOffset=0) and (basescript.Section[i-1].SectionMustHaveContent) then
     begin
-     writeln('ERROR:The Section '+basescript.Section[i-1].SectionName+' content is '
-     +'empty which MUST have the Content.');
-     readln;
-     halt;
+     unifile_raise_error('Generate the Section Content of the Output File',
+     'The Section '+basescript.Section[i-1].SectionName+' content is empty which MUST have the Content.',
+     'Please check the specified linker script for more information,'+
+     'The Section Should be checked is '+basescript.Section[i-1].SectionName+'.',unifile_linkerwait);
     end
    else if((Result.SectionContentInfo[i-1].ContentStartIndex>ContentPointer)or(InternalOffset=0))
    and(basescript.Section[i-1].SectionKeepWhenEmpty=false) then
@@ -2918,10 +2930,11 @@ begin
    else if(basescript.Section[i-1].SectionMaxSize>0) and
    (InternalOffset>=basescript.Section[i-1].SectionMaxSize) then
     begin
-     writeln('ERROR:The Section '+basescript.Section[i-1].SectionName+' exceeds limited size '+
-     IntToStr(basescript.Section[i-1].SectionMaxSize)+'. cannot be linked then.');
-     readln;
-     halt;
+     unifile_raise_error('Generate the Section Content of the Output File',
+     'The Section '+basescript.Section[i-1].SectionName+' exceeds limited size '+
+     IntToStr(basescript.Section[i-1].SectionMaxSize)+'. cannot be linked then.',
+     'Please check the specified linker script for more information,'+
+     'The Section Should be checked is '+basescript.Section[i-1].SectionName+'.',unifile_linkerwait);
     end
    else
     begin
@@ -2990,9 +3003,9 @@ begin
      inc(k);
      Result.SymbolTable.SymbolName[k-1]:=basescript.GlobalOffsetTableAlias;
      Result.SymbolTable.SymbolNameHash[k-1]:=
-     unihash_generate_value(basescript.GlobalOffsetTableAlias,false);
+     unihash_generate_value(basescript.GlobalOffsetTableAlias);
      Result.SymbolTable.SymbolSectionName[k-1]:='.got';
-     Result.SymbolTable.SymbolSectionNameHash[k-1]:=unihash_generate_value('.got',true);
+     Result.SymbolTable.SymbolSectionNameHash[k-1]:=unihash_generate_value('.got');
      Result.SymbolTable.SymbolBinding[k-1]:=elf_symbol_bind_local;
      Result.SymbolTable.SymbolSize[k-1]:=0;
      Result.SymbolTable.SymbolValue[k-1]:=0;
@@ -3004,9 +3017,9 @@ begin
      inc(k);
      Result.SymbolTable.SymbolName[k-1]:=basescript.DynamicSectionAlias;
      Result.SymbolTable.SymbolNameHash[k-1]:=
-     unihash_generate_value(basescript.DynamicSectionAlias,false);
+     unihash_generate_value(basescript.DynamicSectionAlias);
      Result.SymbolTable.SymbolSectionName[k-1]:='.dynamic';
-     Result.SymbolTable.SymbolSectionNameHash[k-1]:=unihash_generate_value('.dynamic',true);
+     Result.SymbolTable.SymbolSectionNameHash[k-1]:=unihash_generate_value('.dynamic');
      Result.SymbolTable.SymbolBinding[k-1]:=elf_symbol_bind_local;
      Result.SymbolTable.SymbolSize[k-1]:=0;
      Result.SymbolTable.SymbolValue[k-1]:=0;
@@ -3048,9 +3061,9 @@ begin
         end;
        if(VaildLenVaildStrong>1) Then
         Begin
-         WriteLn('ERROR:Multiple Definition of the Strong Symbol ',basefile.SectionSymbolTable.SymbolName[i-1]);
-         ReadLn;
-         Halt;
+         unifile_raise_error('Generate the Section Content of the Output File',
+         'Multiple Definition of the Strong Symbol '+basefile.SectionSymbolTable.SymbolName[i-1],
+         'Please check the specified input ELF object files for more information.',unifile_linkerwait);
         end
        else if(VaildLenVaildStrong=1) Then
         Begin
@@ -3184,10 +3197,9 @@ begin
      basefile.SectionRelocation[i-1].RelocationSymbolHash[a-1]);
      if(h>1) then
       begin
-       writeln('ERROR:Multiple Definition of '+
-       basefile.SectionRelocation[i-1].RelocationSymbol[a-1]+',cannot be linked.');
-       readln;
-       halt;
+       unifile_raise_error('Generate the Section Content of the Output File',
+       'Multiple Definition of '+basefile.SectionRelocation[i-1].RelocationSymbol[a-1]+',cannot be linked.',
+       'Please check the specified input ELF object files for more information.',unifile_linkerwait);
       end;
      e:=Result.SectionCount;
      f:=unifile_search_for_hash_table(Result.SectionContentAssist,
@@ -3244,10 +3256,9 @@ begin
       end
      else if(basescript.NoExternalLibrary) and (d=0) then
       begin
-       writeln('ERROR:'+basefile.SectionRelocation[i-1].RelocationSymbol[a-1]+' not found.');
-       writeln('Check all the object files which comprises this symbol.');
-       readln;
-       halt;
+       unifile_raise_error('Generate the Section Content of the Output File',
+       basefile.SectionRelocation[i-1].RelocationSymbol[a-1]+' not found in input object files.',
+       'Please check the specified input ELF object files for more information.',unifile_linkerwait);
       end
      else if(basescript.IsEFIFile=false) and (basescript.IsUntypedBinary=false) and (d=0) then
      Result.ExternalNeeded:=true;
@@ -4507,9 +4518,9 @@ begin
        StartOffset:=outputfile.SectionAddress[0]-outputfile.FileStartAddress
        else
         begin
-         writeln('ERROR:Cannot Generate the Program Header for the file '+filename+'.');
-         readln;
-         halt;
+         unifile_raise_error('Generate the Output file of Linking',
+         'Cannot Generate the Program Header for the file '+filename+'.',
+         'Please check the specified input ELF object files for more information.',unifile_linkerwait);
         end;
        StartAddress:=outputfile.BaseAddress; StartOffset:=0;
        PartAlign:=0; PartAttribute:=0;
@@ -4857,9 +4868,9 @@ begin
        StartOffset:=outputfile.SectionAddress[0]-outputfile.FileStartAddress
        else
         begin
-         writeln('ERROR:Cannot Generate the Program Header for the file '+filename+'.');
-         readln;
-         halt;
+         unifile_raise_error('Generate the Output file of Linking',
+         'Cannot Generate the Program Header for the file '+filename+'.',
+         'Please check the specified input ELF object files for more information.',unifile_linkerwait);
         end;
        StartAddress:=outputfile.BaseAddress; StartOffset:=0;
        PartAlign:=0; PartAttribute:=0;
@@ -6216,7 +6227,7 @@ begin
      finalfile.SymbolTable.SymbolSectionIndex[j-1]:=elf_symbol_other_absolute;
      finalfile.SymbolTable.SymbolName[j-1]:=basefile.FileName[a-1];
      finalfile.SymbolTable.SymbolNameHash[j-1]:=
-     unihash_generate_value(basefile.FileName[a-1],false);
+     unihash_generate_value(basefile.FileName[a-1]);
      finalfile.SymbolTable.SymbolBinding[j-1]:=elf_symbol_bind_local;
      finalfile.SymbolTable.SymbolSize[j-1]:=0;
      finalfile.SymbolTable.SymbolType[j-1]:=elf_symbol_type_file;
@@ -6234,7 +6245,7 @@ begin
      finalfile.SymbolTable.SymbolSectionIndex[j-1]:=a;
      finalfile.SymbolTable.SymbolName[j-1]:=finalfile.SectionName[a-1];
      finalfile.SymbolTable.SymbolNameHash[j-1]:=
-     unihash_generate_value(finalfile.SectionName[a-1],false);
+     unihash_generate_value(finalfile.SectionName[a-1]);
      finalfile.SymbolTable.SymbolBinding[j-1]:=elf_symbol_bind_local;
      finalfile.SymbolTable.SymbolSize[j-1]:=0;
      finalfile.SymbolTable.SymbolType[j-1]:=elf_symbol_type_section;
@@ -6300,17 +6311,16 @@ begin
     begin
      if(fileclass=unifile_class_pe_file) then
       begin
-       writeln('ERROR:Symbol '+basefile.SymbolTable.SymbolName[i-1]+' not found in EFI file structure.');
-       readln;
-       halt;
+       unifile_raise_error('Generate the Output file of Linking to EFI(PE) Application',
+       'Symbol '+basefile.SymbolTable.SymbolName[i-1]+' not found in the total output file(UEFI format).',
+       'Please check the specified input ELF object files for more information.',unifile_linkerwait);
       end
      else if(fileclass=unifile_class_elf_file) and
      (basescript.NoFixedAddress=false) and (basescript.elfclass=unild_class_executable) then
       begin
-       writeln('ERROR:Symbol '+basefile.SymbolTable.SymbolName[i-1]+' not found in ELF'+
-       ' format executable in Fixed Address.');
-       readln;
-       halt;
+       unifile_raise_error('Generate the Output file of Linking to ELF Executable without fixed address',
+       'Symbol '+basefile.SymbolTable.SymbolName[i-1]+' not found in ELF format executable in Fixed Address.',
+       'Please check the specified input ELF object files for more information.',unifile_linkerwait);
       end;
      inc(k); inc(j);
      NeedDynamicLibraryTotal:=true;
@@ -6368,9 +6378,9 @@ begin
       end
      else
       begin
-       writeln('ERROR:Symbol '+basefile.SymbolTable.SymbolName[i-1]+' is invaild.');
-       readln;
-       halt;
+       unifile_raise_error('Generate the Output file of Linking to Dynamic Library',
+       'Symbol '+basefile.SymbolTable.SymbolName[i-1]+' is invaild,cannot find the existence in any section.',
+       'Please check the specified input ELF object files for more information.',unifile_linkerwait);
       end;
     end
    else
@@ -6484,10 +6494,10 @@ begin
    (unifile_elf_dynamic_library_total_search_for_hash_table(DynamicLibraryTotal,
    finalfile.DynamicSymbolTable.SymbolNameHash[i-1])=false) then
     begin
-     writeln('ERROR:External Dynamic Symbol '+finalfile.DynamicSymbolTable.SymbolName[i-1]+' not found '+
-     'in the Linked Dynamic Symbol File.');
-     readln;
-     halt;
+     unifile_raise_error('Search for the External Dynamic Library to find Symbol Specified',
+     'External Dynamic Symbol '+finalfile.DynamicSymbolTable.SymbolName[i-1]+' not found '+
+     'in the Linked Dynamic Symbol File.',
+     'Please check the specified Dynamic Library for more information.',unifile_linkerwait);
     end;
    j:=finalfile.DynamicSymbolTable.SymbolNameHash[i-1] mod finalfile.DynamicSymbolTableAssist.BucketCount+1;
    if(finalfile.DynamicSymbolTableAssist.BucketEnable[j]=false) then
@@ -6554,10 +6564,10 @@ begin
         begin
          if(basescript.ImplicitSize[j-1]<=finalfile.SectionSize[i-1]) then
           begin
-           writeln('ERROR:The Name '+basescript.ImplicitSizeName[j-1]+' size exceed the maximum size '+
-           IntToStr(basescript.ImplicitSize[j-1])+'. cannot be linked then.');
-           readln;
-           halt;
+           unifile_raise_error('Check Implicit Section Maximum Size',
+           'The Name '+basescript.ImplicitSizeName[j-1]+' size exceed the maximum size '+
+           IntToStr(basescript.ImplicitSize[j-1])+'. cannot be linked then.',
+           'Please check the specified Dynamic Library for more information.',unifile_linkerwait);
           end;
          basescript.ImplicitSizeName[j-1]:='';
          break;
@@ -7005,15 +7015,14 @@ begin
        Address:=unifile_align(Address,finalfile.SectionAlign[i-1]);
        Offset:=unifile_align(Offset,finalfile.SectionAlign[i-1]);
       end;
-     if(finalfile.SectionAddress[i-1]<=Address) and (finalfile.SectionAttribute[i-1]<>0)
-     then
+     if(finalfile.SectionAddress[i-1]<=Address) and (finalfile.SectionAttribute[i-1]<>0) then
       begin
        if(finalfile.SectionAddressAbsolute[i-1]) then
         begin
-         writeln('ERROR:Section '+finalfile.SectionName[i-1]+' is absolutely addressed,cannot '+
-         ' be changed.');
-         readln;
-         halt;
+         unifile_raise_error('Check the Section Address being Absolute',
+         'Section '+finalfile.SectionName[i-1]+' is absolutely addressed,cannot '+
+         ' be changed while address allocation in the final stage.',
+         'Please check the specified Dynamic Library for more information.',unifile_linkerwait);
         end
        else
        finalfile.SectionAddress[i-1]:=Address;
@@ -7213,6 +7222,9 @@ begin
  if(fileclass=unifile_class_pe_file) then
  finalfile.EntryAddress:=finalfile.SectionAddress[SectionIndex[basefile.EntrySectionIndex-1]-1]+
  basefile.EntryOffset-basescript.BaseAddress
+ else if(basescript.IsEFIFile=false) and (basescript.IsUntypedBinary=false) and
+ (basescript.elfclass<=1) then
+ finalfile.EntryAddress:=0
  else
  finalfile.EntryAddress:=finalfile.SectionAddress[SectionIndex[basefile.EntrySectionIndex-1]-1]+
  basefile.EntryOffset;
@@ -9687,4 +9699,3 @@ begin
 end;
 
 end.
-
